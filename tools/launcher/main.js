@@ -188,7 +188,8 @@ function resolvePython() {
   if (fs.existsSync(venv)) return venv;
   // Auto-create a venv in the vendored dreamcomp (packaged app won't have one).
   try {
-    spawnSync("python3", ["-m", "venv", path.join(DC_DIR, ".venv")], {
+    const pyCmd = win32 ? "python" : "python3";
+    spawnSync(pyCmd, ["-m", "venv", path.join(DC_DIR, ".venv")], {
       stdio: "pipe",
     });
     if (fs.existsSync(venv)) return venv;
