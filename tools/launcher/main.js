@@ -470,6 +470,19 @@ function writeSettings(patch) {
 // ---------------------------------------------------------------------------
 // IPC
 // ---------------------------------------------------------------------------
+function rendererEnabled() {
+  try {
+    const text = fs.readFileSync(CACHE, "utf8");
+    const re = new RegExp("\r?\n");
+    for (const line of text.split(re)) {
+      if (line.startsWith("DREAM_RENDERER:BOOL=")) {
+        return line.split("=")[1].trim().toUpperCase() === "ON";
+      }
+    }
+  } catch {}
+  return false;
+}
+
 function stateSnapshot() {
   const settings = readSettings();
   let discInfo = { exists: false };
