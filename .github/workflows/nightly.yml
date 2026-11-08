@@ -1,0 +1,100 @@
+name: Nightly Release
+
+on:
+  schedule:
+    - cron: "0 0 * * *"  # every night at 00:00 UTC
+  workflow_dispatch:     # allow manual trigger
+
+concurrency:
+  group: nightly-release
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate no game data
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify no game data committed
+        run: |
+          echo "Checking for game data extensions..."
+          if git ls-files | grep -E '\.(chd|cue|gdi|cdi|iso|bin|PVR|AFS|DAT|vmu|vms|vmi|gzf|gpr|rep)$'; then
+            echo "ERROR: Game data files found in repository!"
+            exit 1
+          fi
+          echo "OK: No game data committed."
+
+      - name: Verify no credentials
+        run: |
+          echo "Checking for potential credential files..."
+          if git ls-files | xargs grep -l -i "api_key\|secret\|password\|token" 2>/dev/null | grep -v node_modules; then
+            echo "WARNING: Potential credential files found - review before publishing"
+          else
+            echo "OK: No obvious credential files."
+          fi
+
+  test-launcher:
+    name: Test Electron launcher
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: tools/launcher/package-lock.json
+
+      - name: Install launcher dependencies
+        working-directory: tools/launcher
+        run: npm ci
+
+      - name: Run launcher selftest
+        working-directory: tools/launcher
+        run: npm run selftest
+
+  release:
+    name: Create nightly release
+    needs: [validate, test-launcher]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create nightly tag and push
+        id: tag
+        run: |
+          TAG="nightly-$(date +%Y%m%d)-${{ github.run_id }}"
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Nightly ${{ steps.tag.outputs.tag }}
+          body: |
+            ## Nightly Build
+
+            Automated nightly release from `main`.
+
+            **WARNING:** This repository contains no game data. You must supply your own Bomberman Online (USA) disc image (.chd).
+          draft: false
+          prerelease: true
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
