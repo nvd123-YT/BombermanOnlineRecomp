@@ -36,6 +36,7 @@ exports/
 
 # Build output and machine-local state
 build*/
+dist/
 .dreamcomp/
 shots/
 traces/

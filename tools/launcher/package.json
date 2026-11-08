@@ -6,9 +6,44 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "selftest": "electron . --selftest"
+    "selftest": "electron . --selftest",
+    "package": "electron-builder"
   },
   "devDependencies": {
-    "electron": "^38.0.0"
+    "electron": "^38.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.bomberman-online.launcher",
+    "productName": "Bomberman Online Launcher",
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "tar.gz"
+      ]
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "ui/**",
+      "node_modules/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    }
   }
 }

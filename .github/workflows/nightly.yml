@@ -35,8 +35,8 @@ jobs:
             echo "OK: No obvious credential files."
           fi
 
-  test-launcher:
-    name: Test Electron launcher
+  test-and-package:
+    name: Test and package Electron launcher
     needs: validate
     runs-on: ${{ matrix.os }}
     strategy:
@@ -72,15 +72,32 @@ jobs:
             npm run selftest -- --disable-gpu --no-sandbox
           fi
 
+      - name: Package Electron launcher
+        working-directory: tools/launcher
+        run: npm run package
+
+      - name: Upload launcher artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bomberman-online-launcher-${{ matrix.os }}
+          path: tools/launcher/dist/*
+          retention-days: 7
+
   release:
     name: Create nightly release
-    needs: [validate, test-launcher]
+    needs: [validate, test-and-package]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Download launcher artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+          merge-multiple: true
 
       - name: Create nightly tag and push
         id: tag
@@ -103,6 +120,7 @@ jobs:
             Automated nightly release from `main`.
 
             **WARNING:** This repository contains no game data. You must supply your own Bomberman Online (USA) disc image (.chd).
+          files: release-assets/**/*
           draft: false
           prerelease: true
           generate_release_notes: false

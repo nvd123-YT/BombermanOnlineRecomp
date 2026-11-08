@@ -37,8 +37,8 @@ jobs:
             echo "OK: No obvious credential files."
           fi
 
-  test-launcher:
-    name: Test Electron launcher
+  test-and-package:
+    name: Test and package Electron launcher
     needs: validate
     runs-on: ${{ matrix.os }}
     strategy:
@@ -62,20 +62,50 @@ jobs:
 
       - name: Run launcher selftest
         working-directory: tools/launcher
-        run: npm run selftest
+        env:
+          CI: "true"
+          ELECTRON_DISABLE_GPU: "1"
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            sudo apt-get update -y && sudo apt-get install -y xvfb libxkbcommon-x11-0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libasound2
+            xvfb-run -a npm run selftest -- --disable-gpu --no-sandbox
+          else
+            npm run selftest -- --disable-gpu --no-sandbox
+          fi
+
+      - name: Package Electron launcher
+        working-directory: tools/launcher
+        run: npm run package
+
+      - name: Upload launcher artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bomberman-online-launcher-${{ matrix.os }}
+          path: tools/launcher/dist/*
+          retention-days: 7
 
   release:
     name: Create GitHub release
-    needs: [validate, test-launcher]
+    needs: [validate, test-and-package]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download launcher artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+          merge-multiple: true
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          files: release-assets/**/*
           draft: false
           generate_release_notes: true
         env:
