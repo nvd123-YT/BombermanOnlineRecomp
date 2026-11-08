@@ -62,11 +62,12 @@ jobs:
         working-directory: tools/launcher
         env:
           CI: "true"
+          ELECTRON_DISABLE_GPU: "1"
         shell: bash
         run: |
           if [ "${{ runner.os }}" = "Linux" ]; then
             sudo apt-get update -y && sudo apt-get install -y xvfb libxkbcommon-x11-0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libasound2
-            xvfb-run -a --server-args="-screen 0 1024x768x24 -ac +extension GLX +render -noreset" npm run selftest -- --disable-gpu --no-sandbox
+            xvfb-run -a npm run selftest -- --disable-gpu --no-sandbox
           else
             npm run selftest -- --disable-gpu --no-sandbox
           fi
