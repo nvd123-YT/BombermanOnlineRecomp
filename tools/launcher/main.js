@@ -23,31 +23,40 @@ const EXE = path.join(
 );
 const SELFTEST = process.argv.includes("--selftest");
 
-// Walk up from __dirname looking for the port root (game/bomberman_online.toml).
-// Handles both dev mode (npm start from tools/launcher) and packaged .app bundles.
+// Walk up from __dirname and process.resourcesPath looking for the port root
+// (game/bomberman_online.toml). Handles dev mode and packaged .app bundles
+// on all three platforms.
 function findRepoRoot() {
-  // Check process.resourcesPath and all its parents (packaged .app bundles put
-  // extraResources directly into Contents/Resources/, sometimes inside Contents/Resources/app/).
+  const candidates = [];
+
+  // From __dirname and all parents
+  let dir = path.resolve(__dirname);
+  for (let i = 0; i < 10; i++) {
+    candidates.push(dir);
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  // From process.resourcesPath and all parents (packaged .app bundles)
   if (process.resourcesPath) {
-    let dir = path.resolve(process.resourcesPath);
+    dir = path.resolve(process.resourcesPath);
     for (let i = 0; i < 10; i++) {
-      if (fs.existsSync(path.join(dir, "game", "bomberman_online.toml")))
-        return dir;
+      candidates.push(dir);
       const parent = path.dirname(dir);
       if (parent === dir) break;
       dir = parent;
     }
   }
-  // Walk up from __dirname (dev mode: tools/launcher/../../ or inside .app/Contents/Resources/app/).
-  let dir = path.resolve(__dirname);
-  for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(path.join(dir, "game", "bomberman_online.toml")))
-      return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
+
+  // Return the first candidate that contains game/bomberman_online.toml
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, "game", "bomberman_online.toml"))) {
+      return candidate;
+    }
   }
-  // Fallback: two levels up from __dirname.
+
+  // Fallback: two levels up from __dirname
   return path.resolve(__dirname, "..", "..");
 }
 
