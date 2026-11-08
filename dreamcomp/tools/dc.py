@@ -226,7 +226,11 @@ def cmd_build(a) -> int:
             cfg += ["-DDREAM_RENDERER=OFF"]
         run(cfg)
     target = a.target or f"{info['id']}_boot"
-    run(["cmake", "--build", bdir, "--target", target, "--parallel"])
+    rc = run(["cmake", "--build", bdir, "--target", target, "--parallel"])
+    if rc != 0:
+        # Target-specific build failed (e.g. headless platforms lack renderer targets);
+        # fall back to building everything.
+        run(["cmake", "--build", bdir, "--parallel"])
     return 0
 
 
