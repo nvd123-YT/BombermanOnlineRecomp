@@ -26,6 +26,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import sys
 import tempfile
 import urllib.request
@@ -212,7 +213,18 @@ def cmd_setup(a) -> int:
     return 0
 
 
+def _heartbeat(label: str) -> None:
+    """Print a periodic heartbeat so the user knows the build is still alive."""
+    import time as _t
+    while _heartbeat_running:
+        print(f"[build] {label}: still building... ({int(_t.time() - _heartbeat_start)}s elapsed)", flush=True)
+        _t.sleep(10)
+
+_heartbeat_running = False
+_heartbeat_start = 0
+
 def cmd_build(a) -> int:
+    global _heartbeat_running, _heartbeat_start
     info = port_info(a.port)
     bdir = os.path.join(info["dir"], "build")
     if a.fresh and os.path.isdir(bdir):
@@ -225,13 +237,24 @@ def cmd_build(a) -> int:
         if a.headless:
             cfg += ["-DDREAM_RENDERER=OFF"]
         run(cfg)
+
     target = a.target or f"{info['id']}_boot"
-    rc = run(["cmake", "--build", bdir, "--target", target, "--parallel"])
-    if rc != 0:
-        # Target-specific build failed (e.g. headless platforms lack renderer targets);
-        # fall back to building everything.
-        run(["cmake", "--build", bdir, "--parallel"])
-    return 0
+
+    # Start heartbeat thread so user sees progress during long builds
+    _heartbeat_running = True
+    _heartbeat_start = __import__("time").time()
+    hb = threading.Thread(target=_heartbeat, args=(f"building {target}",), daemon=True)
+    hb.start()
+    try:
+        rc = run(["cmake", "--build", bdir, "--target", target, "--parallel"])
+        if rc != 0:
+            # Target-specific build failed (e.g. headless platforms lack renderer targets);
+            # fall back to building everything.
+            rc = run(["cmake", "--build", bdir, "--parallel"])
+        return rc
+    finally:
+        _heartbeat_running = False
+        hb.join(timeout=2)
 
 
 def launcher_args(info: dict, extra: list[str]) -> list[str]:
