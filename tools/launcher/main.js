@@ -83,6 +83,7 @@ function findRepoRoot() {
   // Return the first candidate that has BOTH game/bomberman_online.toml AND
   // dreamcomp/tools/dc.py AND CMakeLists.txt (the real repo root).
   for (const candidate of candidates) {
+    if (path.basename(candidate) === "launcher") continue;
     if (fs.existsSync(path.join(candidate, "game", "bomberman_online.toml")) &&
         fs.existsSync(path.join(candidate, "dreamcomp", "tools", "dc.py")) &&
         fs.existsSync(path.join(candidate, "CMakeLists.txt"))) {
