@@ -4,6 +4,11 @@
   "private": true,
   "description": "Cross-platform launcher for the Bomberman Online native recompilation.",
   "main": "main.js",
+  "homepage": "https://github.com/nvd123-YT/BombermanOnlineRecomp",
+  "author": {
+    "name": "nvd123-YT",
+    "email": "nvd123-yt@users.noreply.github.com"
+  },
   "scripts": {
     "start": "electron .",
     "selftest": "electron . --selftest",
@@ -33,7 +38,8 @@
         "AppImage",
         "deb",
         "tar.gz"
-      ]
+      ],
+      "maintainer": "nvd123-YT <nvd123-yt@users.noreply.github.com>"
     },
     "files": [
       "main.js",
