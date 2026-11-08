@@ -9,8 +9,8 @@ const os = require("os");
 const net = require("net");
 const { spawn } = require("child_process");
 
-const ROOT = path.resolve(__dirname, "..", "..");
-const DC_DIR = process.env.DREAMCOMP_DIR || path.join(os.homedir(), "Tools", "dreamcomp");
+const ROOT = findRepoRoot();
+const DC_DIR = process.env.DREAMCOMP_DIR || path.join(ROOT, "dreamcomp");
 const LOCAL_JSON = path.join(ROOT, ".dreamcomp", "local.json");
 const BINDINGS_DEFAULT = path.join(ROOT, "game", "bindings.txt");
 const BINDINGS_USER = path.join(ROOT, ".dreamcomp", "bindings.txt");
@@ -22,6 +22,21 @@ const EXE = path.join(
   process.platform === "win32" ? "bomberman-online.exe" : "bomberman-online"
 );
 const SELFTEST = process.argv.includes("--selftest");
+
+// Walk up from __dirname looking for the port root (game/bomberman_online.toml).
+// Handles both dev mode (npm start from tools/launcher) and packaged .app bundles.
+function findRepoRoot() {
+  let dir = path.resolve(__dirname);
+  for (let i = 0; i < 10; i++) {
+    if (fs.existsSync(path.join(dir, "game", "bomberman_online.toml")))
+      return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  // Fallback: __dirname resolved two levels up (dev mode: tools/launcher/../../)
+  return path.resolve(__dirname, "..", "..");
+}
 
 const DEFAULTS = {
   disc: "",
