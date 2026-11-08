@@ -65,11 +65,8 @@ jobs:
         run: |
           case "${{ runner.os }}" in
             Linux)
-              sudo apt-get update -y && sudo apt-get install -y xvfb
-              xvfb-run -a npm run selftest -- --disable-gpu
-              ;;
-            Windows_NT)
-              npm run selftest -- --disable-gpu
+              sudo apt-get update -y && sudo apt-get install -y xvfb libxkbcommon-x11-0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libasound2
+              xvfb-run -a npm run selftest -- --disable-gpu --no-sandbox
               ;;
             *)
               npm run selftest -- --disable-gpu
