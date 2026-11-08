@@ -1,0 +1,51 @@
+# ============================================================
+#  NO GAME DATA IN THIS REPOSITORY. EVER.
+#  Bomberman Online is (c) SEGA / HUDSON SOFT.
+#  This repository ships configuration and original code only;
+#  every player supplies their own disc image.
+#  `python dreamcomp/tools/audit.py assets --repo .` enforces it.
+# ============================================================
+*.cue
+*.gdi
+*.cdi
+*.chd
+*.iso
+*.bin
+*.BIN
+*.PVR
+*.AFS
+*.DAT
+*.vmu
+*.vms
+*.vmi
+*.gzf
+*.gpr
+*.rep
+
+# Extracted from the owner's disc by tools/dc.py setup
+game/extracted/
+game/suggested.toml
+
+# Reverse-engineering databases and exports
+ghidra/
+*.gpr
+*.rep
+*.gzf
+docs/findings/raw/
+exports/
+
+# Build output and machine-local state
+build*/
+.dreamcomp/
+shots/
+traces/
+*.ppm
+*.log
+CLAUDE.local.md
+.claude/settings.local.json
+__pycache__/
+.DS_Store
+
+# Electron launcher dependencies and AI assistant history
+tools/launcher/node_modules/
+.aider.*

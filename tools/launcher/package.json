@@ -1,0 +1,14 @@
+{
+  "name": "bomberman-online-launcher",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Cross-platform launcher for the Bomberman Online native recompilation.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "selftest": "electron . --selftest"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0"
+  }
+}
