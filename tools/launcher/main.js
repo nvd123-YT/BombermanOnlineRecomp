@@ -192,17 +192,32 @@ function detectDisc() {
 function resolvePython() {
   if (process.env.DREAMCOMP_PYTHON) return process.env.DREAMCOMP_PYTHON;
   const win32 = process.platform === "win32";
-  const venv = path.join(
-    DC_DIR, ".venv", win32 ? "Scripts" : "bin", win32 ? "python.exe" : "python"
-  );
-  if (fs.existsSync(venv)) return venv;
-  // Auto-create a venv in the vendored dreamcomp (packaged app won't have one).
+  const venvCandidates = [
+    path.join(DC_DIR, ".venv"),
+    process.resourcesPath && path.join(process.resourcesPath, "dreamcomp", ".venv"),
+    process.resourcesPath && path.join(process.resourcesPath, "app", "dreamcomp", ".venv"),
+    path.join(__dirname, "..", "..", "dreamcomp", ".venv"),
+  ].filter(Boolean);
+  for (const venvDir of venvCandidates) {
+    const venvPy = path.join(
+      venvDir,
+      win32 ? "Scripts" : "bin",
+      win32 ? "python.exe" : "python"
+    );
+    if (fs.existsSync(venvPy)) return venvPy;
+  }
   try {
     const pyCmd = win32 ? "python" : "python3";
     spawnSync(pyCmd, ["-m", "venv", path.join(DC_DIR, ".venv")], {
       stdio: "pipe",
     });
-    if (fs.existsSync(venv)) return venv;
+    const venvPy = path.join(
+      DC_DIR,
+      ".venv",
+      win32 ? "Scripts" : "bin",
+      win32 ? "python.exe" : "python"
+    );
+    if (fs.existsSync(venvPy)) return venvPy;
   } catch {}
   return win32 ? "python" : "python3";
 }
@@ -220,7 +235,21 @@ function toolEnv(extra = {}) {
 }
 
 function dcCommand(args) {
-  return { command: resolvePython(), args: [path.join(DC_DIR, "tools", "dc.py"), ...args] };
+  const pyCmd = resolvePython();
+  const dcCandidates = [
+    path.join(DC_DIR, "tools", "dc.py"),
+    process.resourcesPath && path.join(process.resourcesPath, "dreamcomp", "tools", "dc.py"),
+    process.resourcesPath && path.join(process.resourcesPath, "app", "dreamcomp", "tools", "dc.py"),
+    path.join(__dirname, "..", "..", "dreamcomp", "tools", "dc.py"),
+  ].filter(Boolean);
+  let dcPy = dcCandidates[0];
+  for (const c of dcCandidates) {
+    if (fs.existsSync(c)) {
+      dcPy = c;
+      break;
+    }
+  }
+  return { command: pyCmd, args: [dcPy, ...args] };
 }
 
 function presetArgs(s) {
