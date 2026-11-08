@@ -34,10 +34,17 @@ function findRepoRoot() {
     if (parent === dir) break;
     dir = parent;
   }
-  // Packaged macOS .app: resources live in Contents/Resources (process.resourcesPath).
+  // Packaged app: resources live in process.resourcesPath (extraResources copies
+// dreamcomp/ and game/ there on macOS; Windows/Linux may use resources/app/).
   if (process.resourcesPath) {
-    const res = path.join(process.resourcesPath, "game", "bomberman_online.toml");
-    if (fs.existsSync(res)) return process.resourcesPath;
+    const candidates = [
+      process.resourcesPath,
+      path.join(process.resourcesPath, "app"),
+    ];
+    for (const base of candidates) {
+      if (fs.existsSync(path.join(base, "game", "bomberman_online.toml")))
+        return base;
+    }
   }
   // Fallback: __dirname resolved two levels up (dev mode: tools/launcher/../../)
   return path.resolve(__dirname, "..", "..");
