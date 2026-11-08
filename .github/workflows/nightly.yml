@@ -68,6 +68,12 @@ jobs:
             dreamcomp/.venv/Scripts/pip.exe install -U pip 2>/dev/null || true
           fi
 
+      - name: Test game builds through dc.py (launcher build path)
+        working-directory: tools/launcher
+        shell: bash
+        run: |
+          ../../dreamcomp/.venv/bin/python ../../dreamcomp/tools/dc.py build .
+
       - name: Run launcher selftest
         working-directory: tools/launcher
         env:
