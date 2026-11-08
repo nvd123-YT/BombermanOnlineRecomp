@@ -1,26 +1,24 @@
 # Bomberman Online — native recompilation
 
 A native C/C++ recompilation of **Bomberman Online** (Sega Dreamcast, USA, MK-51065 V1.004),
-built on [dreamcomp](https://github.com/phobos665/dream-recomp)-style static SH-4 recompilation.
+built on [dreamcomp](https://github.com/phobos665/dream-recomp)-style static SH-4 recompilation,
+with working original online multiplayer via DCNet and a cross-platform Electron launcher.
 
 The original game is © SEGA / HUDSON SOFT. **This repository contains no game data.** You must
-supply your own disc image. Original online multiplayer compatibility is a core requirement, not
-an optional extra.
+supply your own disc image (`.chd`).
 
 ## What is here
 
 | Path | Purpose |
 |---|---|
 | `game/bomberman_online.toml` | Measured game config for `dream-translate` (disc SHA-1, load/link address) |
-| `src/bomberman_online.cpp` | Port registration and device/MMIO handlers (absent-device expansion registers) |
+| `src/bomberman_online.cpp` | Port registration and device/MMIO handlers |
 | `game/bindings.txt` | Documented default keyboard/gamepad input bindings |
-| `tools/launcher.py` | Tk launcher GUI (disc selection, play/headless/build, controls view, log) |
-| `tools/glslc_shim.c` / `tools/setup_glslc.sh` | Local glslc replacement driving mpv's libshaderc; no Vulkan SDK install |
-| `docs/GAME-INTERNALS.md` | Reverse-engineered facts, with evidence and confidence |
-| `docs/findings/` | Per-phase evidence, raw offsets and open questions |
-| `docs/PLAN.md` | Milestones, gates, verified checkpoints |
+| `tools/launcher/` | Cross-platform Electron launcher (disc browse, Play, online, resolution, controller remap, logs) |
 | `tools/dc.sh` | Run dreamcomp's CLI with the local toolchain environment |
 | `tools/env.sh` | Local paths (dreamcomp, Java, Ghidra, libchdr) — no system installs |
+| `docs/GAME-INTERNALS.md` | Reverse-engineered facts, with evidence and confidence |
+| `docs/PLAN.md` | Milestones, gates, verified checkpoints |
 
 ## Build
 
@@ -31,29 +29,59 @@ venv, and an extracted boot file from your own disc.
 tools/dc.sh setup . --disc "/path/to/Bomberman Online (USA).chd"
 tools/dc.sh build .            # headless-capable build
 tools/dc.sh report . --frames 600
-python tools/launcher.py       # Tk launcher GUI
 ```
 
-The game executable is generated into `build/game/gen/` and is never committed. Windowed mode on
-macOS uses locally installed MoltenVK (`~/.local/MoltenVK/...`) and the glslc shim
-(`~/.local/bmo-tools/glslc-bmo`) — no system Vulkan SDK required.
+The game executable is generated into `build/game/bomberman-online` and is never committed.
+
+## Launcher
+
+The Electron launcher replaces the old Tk UI. Build and run it:
+
+```sh
+cd tools/launcher
+npm ci
+npm start                      # dev mode
+npm run selftest               # verify UI renders on all platforms
+npm run package                # electron-builder: .dmg/.zip (macOS), .exe/.zip (Windows), .AppImage/.deb/.tar.gz (Linux)
+```
+
+The launcher handles disc selection, Play/Headless/Build/Stop, resolution presets + scale slider,
+aspect (native/wide), vSync/fullscreen/FPS/sound, online enable/DCNet server/port, TCP reachability
+test, controller test, remap editor, streaming logs, and settings persistence.
+
+## Online (DCNet)
+
+Original online multiplayer is implemented over the BBA + DCNet:
+
+- **Discovery:** UDP to `dcnet.flyca.st:7655`, picks an access point (US East, Europe, South America, US West)
+- **TCP:** framed `DCNET\x01` prolog + 2-byte LE length Ethernet frames to the access point
+- **DHCP:** Discover → Offer → Request → ACK (assigns IP via DCNet)
+- **Flash:** seeded with Flycast's ISP + BBA blocks (netmask `0xFFFFFF00`, IP 0 = DHCP, valid CRCs)
+
+To play online: create a character in Extras Box first (saves to `.dreamcomp/bomberman.vmu`), then enable
+online in the launcher and enter online mode in-game.
 
 ## Status
-
-Milestone 1 is in progress. See `docs/PLAN.md` for the current verified checkpoint and the exact
-blockers. Do not read a row in this table as more than it says.
 
 | Area | State |
 |---|---|
 | Disc identification, boot binary, first translation | implemented and verified |
-| Native build | headless build verified; windowed macOS build verified via local MoltenVK + glslc shim |
-| Expansion-device probes | all five mapped as absent devices (`0xFFFFFFFF` reads); `unmapped memory accesses: 0` headless + windowed |
-| Translation coverage | `untranslated call targets: 0` after merging 4 modem/BBA function seeds (`0x0C1EA932`, `0x0C1EA93C`, `0x0C1EAA04`, `0x0C1EAA16`) |
-| Startup/loop analysis | entry chain identified in Ghidra (`0x0C010000` -> CRT -> `main 0x0C010080`) |
-| Keyboard controls | documented in `game/bindings.txt`; framework `Bindings::defaults()` provides arrows/Z-X-A-S/Return-Space/Q-W/F1 rebinding |
-| Launcher GUI | `tools/launcher.py` (Tk): disc selection, play/headless/build/stop, controls view, streaming log |
-| Ghidra function naming | startup chain identified; networking functions (`FM_UTL`, `CKageApp`, `CLobby`, `CGameRoom`, `CBattleClient`) not yet named in Ghidra |
-| BBA/PPP utilities | investigated (static), not implemented |
-| Online protocol | investigated at string/symbol level, not implemented |
-| Gameplay/assets | not yet investigated in depth |
-| Menu rendering | severe visual bugs (flickering, misplaced sprites, warping background) — framework renderer issue in translucent-list path |
+| Native build | headless + windowed builds verified (macOS via MoltenVK) |
+| Expansion-device probes | all five mapped as absent devices; `unmapped memory accesses: 0` |
+| Translation coverage | `untranslated call targets: 0` after merging modem/BBA function seeds |
+| Audio | larger circular buffer (93 ms) + rate control; stuttering resolved |
+| BBA / DCNet online | RTL8139 implemented, DCNet transport + DHCP handshake working |
+| Game reached title screen | confirmed via scripted input |
+| Character creation | VMU `.dreamcomp/bomberman.vmu` contains valid `BOMBERONLINE` save |
+| Online connection | TCP established to DCNet access point; DHCP Offer received |
+| Launcher | Electron: disc browse, Play, online, resolution, controller remap, logs, settings |
+| Packaging | electron-builder: macOS .dmg/.zip, Windows .exe/.zip, Linux .AppImage/.deb/.tar.gz |
+| CI | GitHub Actions: nightly builds on macOS/Windows/Linux + tag-triggered releases |
+| Menu rendering | suspected stretch; true widescreen TBD |
+
+## Repository rules
+
+- **No game data committed:** `.chd`, `.vmu`, `.PVR`, `.AFS`, etc. are all in `.gitignore`
+- **No credentials, no Ghidra DBs**
+- **No push/publish without authorization**
+- Nightly releases are built automatically at 00:00 UTC; tag a commit with `v*` for a formal release
