@@ -26,27 +26,31 @@ const SELFTEST = process.argv.includes("--selftest");
 // Walk up from __dirname and process.resourcesPath looking for the port root
 // (game/bomberman_online.toml). Handles dev mode and packaged .app bundles
 // on all three platforms.
+// Walk up from __dirname and process.resourcesPath looking for the port root
+// (game/bomberman_online.toml). Handles dev mode and packaged .app bundles
+// on all three platforms.
 function findRepoRoot() {
   const candidates = [];
 
-  // From __dirname and all parents
-  let dir = path.resolve(__dirname);
-  for (let i = 0; i < 10; i++) {
-    candidates.push(dir);
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-
-  // From process.resourcesPath and all parents (packaged .app bundles)
+  // From process.resourcesPath upwards (packaged .app bundles put extraResources
+  // directly into Contents/Resources/ on macOS)
   if (process.resourcesPath) {
-    dir = path.resolve(process.resourcesPath);
+    let dir = path.resolve(process.resourcesPath);
     for (let i = 0; i < 10; i++) {
       candidates.push(dir);
       const parent = path.dirname(dir);
       if (parent === dir) break;
       dir = parent;
     }
+  }
+
+  // From __dirname upwards (dev mode: tools/launcher/../../ or inside .app/Contents/Resources/app/)
+  let dir = path.resolve(__dirname);
+  for (let i = 0; i < 10; i++) {
+    candidates.push(dir);
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
   }
 
   // Return the first candidate that contains game/bomberman_online.toml
@@ -58,135 +62,7 @@ function findRepoRoot() {
 
   // Fallback: two levels up from __dirname
   return path.resolve(__dirname, "..", "..");
-}
-
-const DEFAULTS = {
-  disc: "",
-  resolution: "native",
-  vsync: false,
-  fullscreen: false,
-  fps: false,
-  audio: true,
-  frames: "600",
-  online: false,
-  conn: "bba",
-  server: "",
-  serverPort: "7655",
-  dcnet: true,
-  scale: 1,
-  aspect: "native",
-};
-
-const PRESETS = {
-  native: { scale: 1, aspect: null, label: "Native" },
-  "720p": { scale: 2, aspect: 16 / 9, label: "720p" },
-  "1080p": { scale: 3, aspect: 16 / 9, label: "1080p" },
-  "1440p": { scale: 4, aspect: 16 / 9, label: "1440p" },
-  "4k": { scale: 6, aspect: 16 / 9, label: "4K" },
-  "8k": { scale: 8, aspect: 16 / 9, label: "8K" },
-};
-
-let win = null;
-let child = null;
-
-// ---------------------------------------------------------------------------
-// Settings
-// ---------------------------------------------------------------------------
-function readSettings() {
-  let stored = {};
-  try {
-    stored = JSON.parse(fs.readFileSync(LOCAL_JSON, "utf8"));
-  } catch {
-    stored = {};
-  }
-  const s = { ...DEFAULTS, ...stored };
-  // Migrate the previous Python launcher schema (display name in "resolution").
-  if (!PRESETS[s.resolution]) {
-    const byLabel = Object.entries(PRESETS).find(
-      ([, p]) => p.label.toLowerCase() === String(s.resolution).toLowerCase()
-    );
-    if (byLabel) s.resolution = byLabel[0];
-    else if (typeof stored.scale === "number") {
-      const byScale = Object.entries(PRESETS).find(([, p]) => p.scale === stored.scale);
-      s.resolution = byScale ? byScale[0] : "native";
-    } else s.resolution = "native";
-  }
-  if (!["bba", "modem", "pppoe"].includes(s.conn)) s.conn = "bba";
-  // scale/aspect are authoritative; derive them once for older settings files.
-  if (typeof s.scale !== "number" || s.scale < 1 || s.scale > 8) {
-    s.scale = (PRESETS[s.resolution] || PRESETS.native).scale;
-  }
-  if (!["native", "wide"].includes(s.aspect)) {
-    s.aspect = (PRESETS[s.resolution] || PRESETS.native).aspect ? "wide" : "native";
-  }
-  return s;
-}
-
-function writeSettings(patch) {
-  const merged = { ...readSettings(), ...patch };
-  merged.scale = Math.max(1, Math.min(8, Number(merged.scale) || 1));
-  merged.aspect = merged.aspect === "wide" ? "wide" : "native";
-  // Keep the display name in sync with the scale where a preset matches.
-  const preset = Object.entries(PRESETS).find(([, p]) => p.scale === merged.scale);
-  merged.resolution = preset ? preset[0] : "custom";
-  try {
-    fs.mkdirSync(path.dirname(LOCAL_JSON), { recursive: true });
-    fs.writeFileSync(LOCAL_JSON, JSON.stringify(merged, null, 2) + "\n");
-  } catch (err) {
-    console.error("settings write failed", err);
-  }
-  return merged;
-}
-
-function rendererEnabled() {
-  try {
-    const text = fs.readFileSync(CACHE, "utf8");
-    for (const line of text.split(/\r?\n/)) {
-      if (line.startsWith("DREAM_RENDERER:BOOL=")) {
-        return line.split("=")[1].trim().toUpperCase() === "ON";
-      }
-    }
-  } catch {}
-  return false;
-}
-
-function detectDisc() {
-  const dirs = [
-    path.join(os.homedir(), "Downloads"),
-    path.join(os.homedir(), "Desktop"),
-    path.join(os.homedir(), "Documents"),
-    ROOT,
-  ];
-  const exts = new Set([".chd", ".gdi", ".cue", ".cdi"]);
-  const found = [];
-  for (const dir of dirs) {
-    let entries = [];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const e of entries) {
-      if (!e.isFile()) continue;
-      if (!exts.has(path.extname(e.name).toLowerCase())) continue;
-      const full = path.join(dir, e.name);
-      let stat = { size: 0, mtimeMs: 0 };
-      try {
-        stat = fs.statSync(full);
-      } catch {}
-      found.push({ full, ...stat });
-    }
-  }
-  if (!found.length) return "";
-  found.sort((a, b) => {
-    const ab = /bomberman/i.test(a.full) ? 0 : 1;
-    const bb = /bomberman/i.test(b.full) ? 0 : 1;
-    return ab - bb || b.mtimeMs - a.mtimeMs;
-  });
-  return found[0].full;
-}
-
-// ---------------------------------------------------------------------------
+}// ---------------------------------------------------------------------------
 // Toolchain
 // ---------------------------------------------------------------------------
 function resolvePython() {
