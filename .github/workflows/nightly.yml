@@ -59,9 +59,14 @@ jobs:
         run: npm ci
 
       - name: Setup Python venv in vendored dreamcomp
+        shell: bash
         run: |
-          python3 -m venv dreamcomp/.venv
-          dreamcomp/.venv/bin/pip install -U pip 2>/dev/null || true
+          python3 -m venv dreamcomp/.venv || python -m venv dreamcomp/.venv
+          if [ -f dreamcomp/.venv/bin/pip ]; then
+            dreamcomp/.venv/bin/pip install -U pip 2>/dev/null || true
+          elif [ -f dreamcomp/.venv/Scripts/pip.exe ]; then
+            dreamcomp/.venv/Scripts/pip.exe install -U pip 2>/dev/null || true
+          fi
 
       - name: Run launcher selftest
         working-directory: tools/launcher
