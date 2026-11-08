@@ -46,9 +46,7 @@
       "preload.js",
       "ui/**",
       "node_modules/**",
-      "package.json"
-    ],
-    "extraResources": [
+      "package.json",
       "dreamcomp/**",
       "game/**"
     ],
