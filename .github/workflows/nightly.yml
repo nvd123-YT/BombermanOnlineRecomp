@@ -63,12 +63,18 @@ jobs:
         env:
           CI: "true"
         run: |
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            sudo apt-get update -y && sudo apt-get install -y xvfb
-            xvfb-run -a npm run selftest
-          else
-            npm run selftest
-          fi
+          case "${{ runner.os }}" in
+            Linux)
+              sudo apt-get update -y && sudo apt-get install -y xvfb
+              xvfb-run -a npm run selftest -- --disable-gpu
+              ;;
+            Windows_NT)
+              npm run selftest -- --disable-gpu
+              ;;
+            *)
+              npm run selftest -- --disable-gpu
+              ;;
+          esac
 
   release:
     name: Create nightly release
