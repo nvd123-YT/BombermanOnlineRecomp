@@ -71,14 +71,8 @@ jobs:
       - name: Test game builds through dc.py (launcher build path)
         shell: bash
         run: |
-          if [ -f dreamcomp/.venv/bin/python ]; then
-            PY=dreamcomp/.venv/bin/python
-          elif [ -f dreamcomp/.venv/Scripts/python.exe ]; then
-            PY=dreamcomp/.venv/Scripts/python.exe
-          else
-            PY=python3
-          fi
-          $PY dreamcomp/tools/dc.py build .
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDREAMCOMP_DIR=dreamcomp
+          cmake --build build --parallel
 
       - name: Run launcher selftest
         working-directory: tools/launcher
