@@ -80,9 +80,11 @@ function findRepoRoot() {
     dir = parent;
   }
 
-  // Return the first candidate that contains game/bomberman_online.toml
+  // Return the first candidate that has BOTH game/bomberman_online.toml AND
+  // dreamcomp/tools/dc.py (the real repo root, not a subdirectory copy).
   for (const candidate of candidates) {
-    if (fs.existsSync(path.join(candidate, "game", "bomberman_online.toml"))) {
+    if (fs.existsSync(path.join(candidate, "game", "bomberman_online.toml")) &&
+        fs.existsSync(path.join(candidate, "dreamcomp", "tools", "dc.py"))) {
       return candidate;
     }
   }
