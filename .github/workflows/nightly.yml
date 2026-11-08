@@ -58,6 +58,11 @@ jobs:
         working-directory: tools/launcher
         run: npm ci
 
+      - name: Setup Python venv in vendored dreamcomp
+        run: |
+          python3 -m venv dreamcomp/.venv
+          dreamcomp/.venv/bin/pip install -U pip 2>/dev/null || true
+
       - name: Run launcher selftest
         working-directory: tools/launcher
         env:
