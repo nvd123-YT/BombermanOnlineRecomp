@@ -19,8 +19,8 @@ jobs:
 
       - name: Verify no game data committed
         run: |
-          echo "Checking for game data extensions..."
-          if git ls-files | grep -E '\.(chd|cue|gdi|cdi|iso|bin|PVR|AFS|DAT|vmu|vms|vmi|gzf|gpr|rep)$'; then
+          echo "Checking for game data extensions (excluding vendored dreamcomp engine test fixtures)..."
+          if git ls-files | grep -v '^dreamcomp/' | grep -E '\.(chd|cue|gdi|cdi|iso|bin|PVR|AFS|DAT|vmu|vms|vmi|gzf|gpr|rep)$'; then
             echo "ERROR: Game data files found in repository!"
             exit 1
           fi

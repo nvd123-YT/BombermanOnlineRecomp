@@ -218,7 +218,7 @@ function emit(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
-function startProcess(label, command, baseArgs, envPatch = {}) {
+function startProcess(label, command, baseArgs, envPatch = {}, onExit = null) {
   if (child) {
     emit("toast", { kind: "warn", text: "A task is already running." });
     return { ok: false, error: "busy" };
@@ -260,6 +260,7 @@ function startProcess(label, command, baseArgs, envPatch = {}) {
     child = null;
     emit("log", { stream: "meta", text: `${label} exited (${signal || code})` });
     emit("task", { running: false, label, code, signal });
+    if (onExit) onExit(code, signal);
   });
   return { ok: true, pid: proc.pid };
 }
@@ -501,7 +502,19 @@ ipcMain.handle("bindings:write", (_e, text) => writeBindings(String(text)));
 
 ipcMain.handle("game:play", (_e, settings) => {
   const s = writeSettings(settings || {});
-  if (!fs.existsSync(EXE)) return { ok: false, error: "The game binary is missing. Build it first." };
+  if (!fs.existsSync(EXE)) {
+    // Auto-build when Play is pressed and the binary is missing.
+    emit("toast", { kind: "info", text: "Game binary missing – building first…" });
+    return startProcess("build", ["build", "."], {}, (code, signal) => {
+      if (code === 0 && fs.existsSync(EXE)) {
+        emit("toast", { kind: "info", text: "Build complete – launching game…" });
+        startProcess("game", EXE, ["--config", CONFIG, "--window", ...presetArgs(s)], onlineEnv(s));
+      } else {
+        emit("toast", { kind: "error", text: "Build failed – check logs." });
+        emit("log", { stream: "err", text: `Build exited (${signal || code}), game not launched.` });
+      }
+    });
+  }
   if (!rendererEnabled()) {
     return { ok: false, error: "This build was configured headless (DREAM_RENDERER=OFF). Rebuild with Build." };
   }
