@@ -95,6 +95,7 @@ function findRepoRoot() {
 function resolvePython() {
   if (process.env.DREAMCOMP_PYTHON) return process.env.DREAMCOMP_PYTHON;
   const win32 = process.platform === "win32";
+  // Try multiple possible dreamcomp locations for a venv python
   const venvCandidates = [
     path.join(DC_DIR, ".venv"),
     process.resourcesPath && path.join(process.resourcesPath, "dreamcomp", ".venv"),
@@ -109,6 +110,7 @@ function resolvePython() {
     );
     if (fs.existsSync(venvPy)) return venvPy;
   }
+  // Auto-create a venv in the vendored dreamcomp (packaged app won't have one).
   try {
     const pyCmd = win32 ? "python" : "python3";
     spawnSync(pyCmd, ["-m", "venv", path.join(DC_DIR, ".venv")], {
@@ -125,7 +127,23 @@ function resolvePython() {
   return win32 ? "python" : "python3";
 }
 
-function toolEnv(extra = {}) {
+function dcCommand(args) {
+  const pyCmd = resolvePython();
+  const dcCandidates = [
+    path.join(DC_DIR, "tools", "dc.py"),
+    process.resourcesPath && path.join(process.resourcesPath, "dreamcomp", "tools", "dc.py"),
+    process.resourcesPath && path.join(process.resourcesPath, "app", "dreamcomp", "tools", "dc.py"),
+    path.join(__dirname, "..", "..", "dreamcomp", "tools", "dc.py"),
+  ].filter(Boolean);
+  let dcPy = dcCandidates[0];
+  for (const c of dcCandidates) {
+    if (fs.existsSync(c)) {
+      dcPy = c;
+      break;
+    }
+  }
+  return { command: pyCmd, args: [dcPy, ...args] };
+}function toolEnv(extra = {}) {
   const env = { ...process.env, DREAMCOMP_DIR: DC_DIR, ...extra };
   const win32 = process.platform === "win32";
   const venvBin = path.join(DC_DIR, ".venv", win32 ? "Scripts" : "bin");
