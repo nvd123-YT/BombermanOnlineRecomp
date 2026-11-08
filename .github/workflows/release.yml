@@ -71,10 +71,16 @@ jobs:
           fi
 
       - name: Test game builds through dc.py (launcher build path)
-        working-directory: tools/launcher
         shell: bash
         run: |
-          ../../dreamcomp/.venv/bin/python ../../dreamcomp/tools/dc.py build .
+          if [ -f dreamcomp/.venv/bin/python ]; then
+            PY=dreamcomp/.venv/bin/python
+          elif [ -f dreamcomp/.venv/Scripts/python.exe ]; then
+            PY=dreamcomp/.venv/Scripts/python.exe
+          else
+            PY=python3
+          fi
+          $PY dreamcomp/tools/dc.py build .
 
       - name: Run launcher selftest
         working-directory: tools/launcher
