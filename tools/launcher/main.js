@@ -7,7 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const net = require("net");
-const { spawn } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 
 const ROOT = findRepoRoot();
 const DC_DIR = process.env.DREAMCOMP_DIR || path.join(ROOT, "dreamcomp");
@@ -186,6 +186,13 @@ function resolvePython() {
     DC_DIR, ".venv", win32 ? "Scripts" : "bin", win32 ? "python.exe" : "python"
   );
   if (fs.existsSync(venv)) return venv;
+  // Auto-create a venv in the vendored dreamcomp (packaged app won't have one).
+  try {
+    spawnSync("python3", ["-m", "venv", path.join(DC_DIR, ".venv")], {
+      stdio: "pipe",
+    });
+    if (fs.existsSync(venv)) return venv;
+  } catch {}
   return win32 ? "python" : "python3";
 }
 
