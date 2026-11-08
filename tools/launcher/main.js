@@ -23,6 +23,33 @@ const EXE = path.join(
 );
 const SELFTEST = process.argv.includes("--selftest");
 
+const DEFAULTS = {
+  disc: "",
+  resolution: "native",
+  vsync: false,
+  fullscreen: false,
+  fps: false,
+  audio: true,
+  frames: "600",
+  online: false,
+  conn: "bba",
+  server: "",
+  serverPort: "7655",
+  dcnet: true,
+  scale: 1,
+  aspect: "native",
+};
+
+const PRESETS = {
+  native: { scale: 1, aspect: null, label: "Native" },
+  "720p": { scale: 2, aspect: 16 / 9, label: "720p" },
+  "1080p": { scale: 3, aspect: 16 / 9, label: "1080p" },
+  "1440p": { scale: 4, aspect: 16 / 9, label: "1440p" },
+  "4k": { scale: 6, aspect: 16 / 9, label: "4K" },
+  "8k": { scale: 8, aspect: 16 / 9, label: "8K" },
+};
+
+
 // Walk up from __dirname and process.resourcesPath looking for the port root
 // (game/bomberman_online.toml). Handles dev mode and packaged .app bundles
 // on all three platforms.
