@@ -34,6 +34,11 @@ function findRepoRoot() {
     if (parent === dir) break;
     dir = parent;
   }
+  // Packaged macOS .app: resources live in Contents/Resources (process.resourcesPath).
+  if (process.resourcesPath) {
+    const res = path.join(process.resourcesPath, "game", "bomberman_online.toml");
+    if (fs.existsSync(res)) return process.resourcesPath;
+  }
   // Fallback: __dirname resolved two levels up (dev mode: tools/launcher/../../)
   return path.resolve(__dirname, "..", "..");
 }
