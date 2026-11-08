@@ -26,6 +26,19 @@ const SELFTEST = process.argv.includes("--selftest");
 // Walk up from __dirname looking for the port root (game/bomberman_online.toml).
 // Handles both dev mode (npm start from tools/launcher) and packaged .app bundles.
 function findRepoRoot() {
+  // Check process.resourcesPath and all its parents (packaged .app bundles put
+  // extraResources directly into Contents/Resources/, sometimes inside Contents/Resources/app/).
+  if (process.resourcesPath) {
+    let dir = path.resolve(process.resourcesPath);
+    for (let i = 0; i < 10; i++) {
+      if (fs.existsSync(path.join(dir, "game", "bomberman_online.toml")))
+        return dir;
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  // Walk up from __dirname (dev mode: tools/launcher/../../ or inside .app/Contents/Resources/app/).
   let dir = path.resolve(__dirname);
   for (let i = 0; i < 10; i++) {
     if (fs.existsSync(path.join(dir, "game", "bomberman_online.toml")))
@@ -34,19 +47,7 @@ function findRepoRoot() {
     if (parent === dir) break;
     dir = parent;
   }
-  // Packaged app: resources live in process.resourcesPath (extraResources copies
-// dreamcomp/ and game/ there on macOS; Windows/Linux may use resources/app/).
-  if (process.resourcesPath) {
-    const candidates = [
-      process.resourcesPath,
-      path.join(process.resourcesPath, "app"),
-    ];
-    for (const base of candidates) {
-      if (fs.existsSync(path.join(base, "game", "bomberman_online.toml")))
-        return base;
-    }
-  }
-  // Fallback: __dirname resolved two levels up (dev mode: tools/launcher/../../)
+  // Fallback: two levels up from __dirname.
   return path.resolve(__dirname, "..", "..");
 }
 
