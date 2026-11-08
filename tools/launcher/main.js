@@ -392,6 +392,55 @@ async function runSelftest() {
 }
 
 // ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+function readSettings() {
+  let stored = {};
+  try {
+    stored = JSON.parse(fs.readFileSync(LOCAL_JSON, "utf8"));
+  } catch {
+    stored = {};
+  }
+  const s = { ...DEFAULTS, ...stored };
+  // Migrate the previous Python launcher schema (display name in "resolution").
+  if (!PRESETS[s.resolution]) {
+    const byLabel = Object.entries(PRESETS).find(
+      ([, p]) => p.label.toLowerCase() === String(s.resolution).toLowerCase()
+    );
+    if (byLabel) s.resolution = byLabel[0];
+    else if (typeof stored.scale === "number") {
+      const byScale = Object.entries(PRESETS).find(([, p]) => p.scale === stored.scale);
+      s.resolution = byScale ? byScale[0] : "native";
+    } else s.resolution = "native";
+  }
+  if (!["bba", "modem", "pppoe"].includes(s.conn)) s.conn = "bba";
+  // scale/aspect are authoritative; derive them once for older settings files.
+  if (typeof s.scale !== "number" || s.scale < 1 || s.scale > 8) {
+    s.scale = (PRESETS[s.resolution] || PRESETS.native).scale;
+  }
+  if (!["native", "wide"].includes(s.aspect)) {
+    s.aspect = (PRESETS[s.resolution] || PRESETS.native).aspect ? "wide" : "native";
+  }
+  return s;
+}
+
+function writeSettings(patch) {
+  const merged = { ...readSettings(), ...patch };
+  merged.scale = Math.max(1, Math.min(8, Number(merged.scale) || 1));
+  merged.aspect = merged.aspect === "wide" ? "wide" : "native";
+  // Keep the display name in sync with the scale where a preset matches.
+  const preset = Object.entries(PRESETS).find(([, p]) => p.scale === merged.scale);
+  merged.resolution = preset ? preset[0] : "custom";
+  try {
+    fs.mkdirSync(path.dirname(LOCAL_JSON), { recursive: true });
+    fs.writeFileSync(LOCAL_JSON, JSON.stringify(merged, null, 2) + "\n");
+  } catch (err) {
+    console.error("settings write failed", err);
+  }
+  return merged;
+}
+
+// ---------------------------------------------------------------------------
 // IPC
 // ---------------------------------------------------------------------------
 function stateSnapshot() {
