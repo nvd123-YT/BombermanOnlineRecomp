@@ -43,4 +43,17 @@ for (const name of ENTRIES) {
 const local = path.join(HERE, "game", ".dreamcomp");
 fs.rmSync(local, { recursive: true, force: true });
 
+// Include the compiled game binary so the launcher can run it immediately
+// without requiring a build step. This makes the pre-built release experience
+// seamless: download, click Play, and the game starts.
+const BINARY_SRC = path.join(ROOT, "build", "game", "bomberman-online");
+const BINARY_DST = path.join(HERE, "game", "bomberman-online");
+if (fs.existsSync(BINARY_SRC)) {
+  fs.rmSync(BINARY_DST, { recursive: true, force: true });
+  fs.cpSync(BINARY_SRC, BINARY_DST);
+  console.log(`synced bomberman-online binary`);
+} else {
+  console.log("bomberman-online binary not found (will auto-build on first Play)");
+}
+
 console.log("launcher build inputs are up to date");

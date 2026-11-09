@@ -268,7 +268,7 @@ struct Pacing {
             return;
         std::vector<float> v = intervals_ms;
         std::sort(v.begin(), v.end());
-        auto pct = [&](double q) { return v[static_cast<std::size_t>(q * (v.size() - 1))]; };
+        auto pct = [&](double q) { return v[static_cast<std::size_t>(q * (static_cast<double>(v.size()) - 1))]; };
         std::size_t late = 0, very_late = 0;
         double sum = 0;
         for (float x : intervals_ms) {
@@ -290,7 +290,7 @@ struct Pacing {
             std::printf("pacing: input age at present (pads read -> frame presented): mean %.2f ms, "
                         "p50 %.2f p95 %.2f max %.1f ms\n",
                         asum / static_cast<double>(a.size()), a[a.size() / 2],
-                        a[static_cast<std::size_t>(0.95 * (a.size() - 1))], a.back());
+                        a[static_cast<std::size_t>(0.95 * (static_cast<double>(a.size()) - 1))], a.back());
         }
         if (!late_frames.empty()) {
             std::printf("pacing: late frames (guest frame: ms, textures decoded, pipelines made, "
@@ -2597,9 +2597,12 @@ int main(int argc, char** argv) {
                             const auto budget = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                                 sync.budget(period));
                             const auto lead = budget + sync.margin;
-                            auto next = sync.target.time_since_epoch().count() == 0
-                                            ? sync.target
-                                            : snap(sync.target + per);
+                            std::chrono::steady_clock::time_point next;
+                            if (sync.target.time_since_epoch().count() == 0) {
+                                next = sync.target;
+                            } else {
+                                next = snap(sync.target + per);
+                            }
                             if (next.time_since_epoch().count() == 0 || next - lead < now - per) {
                                 next = snap(now + lead + per / 2);
                                 if (sync.target.time_since_epoch().count() != 0)
@@ -3003,8 +3006,8 @@ int main(int argc, char** argv) {
             const auto& st = sys.sched.stat(static_cast<int>(i));
             if (!st.calls)
                 continue;
-            rows.push_back({sys.sched.name(static_cast<int>(i)), st.ns * 1e-9, st.calls});
-            accounted += st.ns * 1e-9;
+            rows.push_back({sys.sched.name(static_cast<int>(i)), static_cast<double>(st.ns) * 1e-9, st.calls});
+            accounted += static_cast<double>(st.ns) * 1e-9;
         }
         if (g_renders) {
             rows.push_back({"pvr render (TA list -> GPU)", g_render_ns * 1e-9, g_renders});
