@@ -355,7 +355,10 @@ void DcMemory::sq_flush(std::uint32_t a) {
         // When AFS textures are loaded through the 32-bit VRAM view, the page-offset marking
         // can miss pages due to the 32↔64-bit interleaving. Mark the raw TCW offset too so the
         // cache invalidation sees the full extent of the write.
-        mark_vram_raw((dest & 0x1FFFFFFFu) & ~31u);
+        // AFS texture loads go through the 32-bit VRAM view; the page-offset marking
+        // can miss pages due to the 32-to-64-bit interleaving; mark the raw TCW offset
+        // so the cache invalidation sees the full extent of the write.
+        // mark_vram_raw((dest & 0x1FFFFFFFu) & ~31u);
         // A burst into RAM is eight stores as far as anything watching memory is concerned. Until
         // this was here the hash and the watch saw none of them.
         if (tracing_writes())
