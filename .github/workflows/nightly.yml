@@ -104,7 +104,7 @@ jobs:
       - name: Build static SDL3
         shell: bash
         run: |
-          git clone --depth 1 --branch release-3.2.28 https://github.com/libsdl-org/SDL.git "$RUNNER_TEMP/SDL"
+          git clone --depth 1 --branch release-3.4.20 https://github.com/libsdl-org/SDL.git "$RUNNER_TEMP/SDL"
           cmake -S "$RUNNER_TEMP/SDL" -B "$RUNNER_TEMP/SDL-build" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdl3" \

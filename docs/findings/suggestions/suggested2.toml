@@ -1,6 +1,0 @@
-# Suggested by /Users/nicolas.delponte/Documents/GitHub/BombermanOnlineRecomp/build/game/bomberman-online from a run that stopped: frame limit.
-# Call targets this run reached that the translator had not found. Paste into the game's
-# TOML, rebuild, and run again: each one seeds discovery, which usually finds more than
-# the one function. Addresses are in link space, which is what [functions] expects.
-[functions]
-extra = [0x0C0A40EE]  # called 1 time
