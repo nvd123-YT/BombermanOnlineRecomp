@@ -145,26 +145,20 @@ jobs:
           echo "Prebuilt executable ready: $GAME_EXE"
           ls -lah build/game
 
-      - name: Bundle Vulkan loader for Windows
+      - name: Stage Windows Vulkan loader when present
         if: runner.os == 'Windows'
-        shell: bash
+        shell: pwsh
         run: |
-          python - <<'PY'
-          import os, shutil
-          from pathlib import Path
-
-          sdk = Path(os.environ["VULKAN_SDK"])
-          candidates = [sdk / "Bin" / "vulkan-1.dll", sdk / "bin" / "vulkan-1.dll"]
-          loader = next((path for path in candidates if path.is_file()), None)
-          if loader is None:
-              matches = list(sdk.rglob("vulkan-1.dll"))
-              loader = matches[0] if matches else None
-          if loader is None:
-              raise SystemExit(f"Vulkan loader DLL was not found under {sdk}")
-          destination = Path("build/game/vulkan-1.dll")
-          shutil.copy2(loader, destination)
-          print(f"Bundled Vulkan loader: {loader} -> {destination}")
-          PY
+          # The Vulkan SDK supplies headers, import libraries and shader tools.
+          # The runtime loader is normally installed by the user's graphics driver
+          # into Windows\System32; the SDK archive is not guaranteed to include it.
+          $loader = Join-Path $env:SystemRoot "System32\vulkan-1.dll"
+          if (Test-Path $loader) {
+            Copy-Item $loader "build/game/vulkan-1.dll" -Force
+            Write-Host "Bundled the runner's Vulkan loader: $loader"
+          } else {
+            Write-Host "No Vulkan loader on this runner; Windows graphics drivers provide vulkan-1.dll on target systems. Continuing package build."
+          }
 
       - name: Bundle Vulkan runtime for macOS
         if: runner.os == 'macOS'
