@@ -174,7 +174,7 @@ jobs:
           from pathlib import Path
           data = json.loads(Path(sys.argv[1]).read_text())
           data["ICD"]["library_path"] = "./libMoltenVK.dylib"
-          Path(sys.argv[2]).write_text(json.dumps(data, indent=2) + "\\n")
+          Path(sys.argv[2]).write_text(json.dumps(data, indent=2) + "\n")
           PY
           echo "Bundled Vulkan loader and MoltenVK ICD for the macOS release."
           otool -L "$GAME_EXE"
