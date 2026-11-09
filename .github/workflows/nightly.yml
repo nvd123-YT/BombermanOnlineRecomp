@@ -143,6 +143,40 @@ jobs:
           echo "Prebuilt executable ready: $GAME_EXE"
           ls -lah build/game
 
+      - name: Bundle Vulkan runtime for macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          GAME_DIR="build/game"
+          GAME_EXE="$GAME_DIR/bomberman-online"
+          test -s "$GAME_EXE"
+          # The SDK loader is a dylib dependency of the native game. Copy the exact
+          # linked loader filename into the game directory and rewrite its install name.
+          while IFS= read -r dependency; do
+            case "$dependency" in
+              *libvulkan*.dylib)
+                name="$(basename "$dependency")"
+                cp -L "$dependency" "$GAME_DIR/$name"
+                install_name_tool -change "$dependency" "@executable_path/$name" "$GAME_EXE"
+                ;;
+            esac
+          done < <(otool -L "$GAME_EXE" | awk 'NR > 1 {print $1}')
+          MOLTEN_LIB="$(find "$VULKAN_SDK" -name libMoltenVK.dylib -print -quit)"
+          ICD_SOURCE="$(find "$VULKAN_SDK" -name MoltenVK_icd.json -print -quit)"
+          test -n "$MOLTEN_LIB" && test -f "$MOLTEN_LIB"
+          test -n "$ICD_SOURCE" && test -f "$ICD_SOURCE"
+          cp -L "$MOLTEN_LIB" "$GAME_DIR/libMoltenVK.dylib"
+          install_name_tool -add_rpath @executable_path "$GAME_EXE" 2>/dev/null || true
+          python - "$ICD_SOURCE" "$GAME_DIR/MoltenVK_icd.json" <<'PY'
+          import json, sys
+          from pathlib import Path
+          data = json.loads(Path(sys.argv[1]).read_text())
+          data["ICD"]["library_path"] = "./libMoltenVK.dylib"
+          Path(sys.argv[2]).write_text(json.dumps(data, indent=2) + "\\n")
+          PY
+          echo "Bundled Vulkan loader and MoltenVK ICD for the macOS release."
+          otool -L "$GAME_EXE"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:

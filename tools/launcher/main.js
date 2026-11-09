@@ -303,6 +303,13 @@ function onlineEnv(s) {
   );
   // Frame tracing so we can see DHCP/DNS traffic on the wire.
   if (s.online) env.BMO_DEBUG = "1";
+  // The macOS release carries its Vulkan loader and MoltenVK ICD beside the game executable.
+  // Point the child process at that private bundle copy; GUI-launched apps cannot rely on
+  // DYLD_LIBRARY_PATH or a system-wide Vulkan SDK installation.
+  if (app.isPackaged && process.platform === "darwin") {
+    const icd = path.join(path.dirname(EXE), "MoltenVK_icd.json");
+    if (fs.existsSync(icd)) env.VK_ICD_FILENAMES = icd;
+  }
   return env;
 }
 
