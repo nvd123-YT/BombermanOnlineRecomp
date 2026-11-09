@@ -88,10 +88,15 @@ struct PortIcon {
   # Windows has no rpath: put the runtime DLLs of everything linked (SDL3) next to the executable.
   # SDL3::SDL3 is an imported target scoped to the engine's directory, so name no target here.
   if(WIN32)
+    # TARGET_RUNTIME_DLLS may legitimately expand to an empty list when all
+    # dependencies are static. Pass it to a script so an empty list does not
+    # turn cmake -E copy_if_different into an invalid command.
     add_custom_command(TARGET ${id}_boot POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${id}_boot>
-              $<TARGET_FILE_DIR:${id}_boot>
-      COMMAND_EXPAND_LISTS VERBATIM)
+      COMMAND ${CMAKE_COMMAND}
+        "-DRUNTIME_DLLS=$<TARGET_RUNTIME_DLLS:${id}_boot>"
+        "-DOUTPUT_DIR=$<TARGET_FILE_DIR:${id}_boot>"
+        -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/CopyRuntimeDlls.cmake"
+      VERBATIM)
   endif()
   if(TARGET dreamcomp_frontend)
     target_link_libraries(${id}_boot PRIVATE dreamcomp_frontend)

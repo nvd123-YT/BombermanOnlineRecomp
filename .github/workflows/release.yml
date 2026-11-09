@@ -152,13 +152,24 @@ jobs:
           GAME_DIR="build/game"
           GAME_EXE="$GAME_DIR/bomberman-online"
           test -s "$GAME_EXE"
-          # The SDK loader is a dylib dependency of the native game. Copy the exact
-          # linked loader filename into the game directory and rewrite its install name.
+          # Vulkan's loader is linked as @rpath/libvulkan.1.dylib on macOS.
+          # That is a Mach-O install name, not a filesystem path; resolve it inside
+          # the SDK before copying it beside the executable.
           while IFS= read -r dependency; do
             case "$dependency" in
               *libvulkan*.dylib)
                 name="$(basename "$dependency")"
-                cp -L "$dependency" "$GAME_DIR/$name"
+                if [ -f "$dependency" ]; then
+                  loader_source="$dependency"
+                else
+                  loader_source="$(find "$VULKAN_SDK" -name "$name" -print -quit)"
+                fi
+                if [ -z "$loader_source" ] || [ ! -f "$loader_source" ]; then
+                  echo "::error::Could not resolve $dependency inside VULKAN_SDK=$VULKAN_SDK"
+                  find "$VULKAN_SDK" -iname '*vulkan*.dylib' -print || true
+                  exit 1
+                fi
+                cp -L "$loader_source" "$GAME_DIR/$name"
                 install_name_tool -change "$dependency" "@executable_path/$name" "$GAME_EXE"
                 ;;
             esac
