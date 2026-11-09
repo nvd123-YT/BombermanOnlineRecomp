@@ -1,0 +1,13 @@
+<rml>
+<head>
+	<title>dreamcomp</title>
+	<link type="text/rcss" href="dreamcomp.rcss"/>
+	<!-- A port's own frontend/port.rcss (LAUNCHER_DIR in dreamcomp_add_port) is linked after this
+	     by the launcher when present, so it can override colours or add art. The screens are
+	     generated into #page by src/frontend/menu_ui.cpp; the same document is shown before the
+	     game (SDL renderer) and over it (CPU renderer, body class "ingame"). -->
+</head>
+<body>
+	<div id="page"></div>
+</body>
+</rml>

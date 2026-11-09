@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""A minimal `glslc` replacement for the dreamcomp renderer.
+
+The renderer only needs the subset of glslc that CMake invokes:
+
+    glslc --target-env=vulkan1.1 -O -mfmt=c -o OUT.inc IN.vert
+
+macOS has no system Vulkan SDK here, and installing one is out of scope. The machine already
+carries libshaderc (mpv bundles it), which is the same compiler glslc wraps, so this shim drives
+that library through its stable C API and emits the same `-mfmt=c` initializer list.
+
+Set SHADERC_LIB to override the library path.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import os
+import sys
+from pathlib import Path
+
+DEFAULT_SHADERC = (
+    Path.home()
+    / "Tools/mpv/mpv-arm64-0.40.0/mpv.app/Contents/MacOS/lib/libshaderc_shared.1.dylib"
+)
+
+# shaderc_shader_kind (libshaderc/include/shaderc/shaderc.h)
+KIND = {
+    ".vert": 0,  # shaderc_vertex_shader
+    ".frag": 1,  # shaderc_fragment_shader
+    ".comp": 2,
+    ".geom": 3,
+    ".tesc": 4,
+    ".tese": 5,
+}
+# shaderc_target_env_vulkan = 0; shaderc_env_version_vulkan_1_1 = (1 << 22) | (1 << 12)
+TARGET_VULKAN = 0
+ENV_VULKAN_1_1 = (1 << 22) | (1 << 12)
+OPT_PERFORMANCE = 2
+
+
+def fail(msg: str) -> "NoReturn":
+    print(f"glslc(shim): {msg}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def parse_args(argv: list[str]) -> dict:
+    out = {
+        "input": None,
+        "output": None,
+        "fmt": "c",
+        "opt": False,
+        "target": "vulkan1.1",
+        "stage": None,
+    }
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "-o":
+            i += 1
+            out["output"] = argv[i]
+        elif a.startswith("-o"):
+            out["output"] = a[2:]
+        elif a == "-mfmt=c":
+            out["fmt"] = "c"
+        elif a.startswith("-mfmt="):
+            out["fmt"] = a.split("=", 1)[1]
+        elif a == "-O":
+            out["opt"] = True
+        elif a.startswith("--target-env="):
+            out["target"] = a.split("=", 1)[1]
+        elif a.startswith("-fshader-stage="):
+            out["stage"] = a.split("=", 1)[1]
+        elif a.startswith("-"):
+            # Unknown flags are ignored on purpose: this is a build helper, not a full glslc.
+            pass
+        else:
+            out["input"] = a
+        i += 1
+    if not out["input"]:
+        fail("no input file")
+    if not out["output"]:
+        fail("no -o output file")
+    return out
+
+
+def load_shaderc():
+    path = os.environ.get("SHADERC_LIB") or str(DEFAULT_SHADERC)
+    if not Path(path).exists():
+        fail(
+            f"shaderc library not found at {path}; set SHADERC_LIB to libshaderc_shared"
+        )
+    lib = ctypes.CDLL(path)
+    vp = ctypes.c_void_p
+    lib.shaderc_compiler_initialize.restype = vp
+    lib.shaderc_compiler_release.argtypes = [vp]
+    lib.shaderc_compile_options_initialize.restype = vp
+    lib.shaderc_compile_options_release.argtypes = [vp]
+    lib.shaderc_compile_options_set_target_env.argtypes = [vp, ctypes.c_int, ctypes.c_uint]
+    lib.shaderc_compile_options_set_optimization_level.argtypes = [vp, ctypes.c_int]
+    lib.shaderc_compile_into_spv.restype = vp
+    lib.shaderc_compile_into_spv.argtypes = [
+        vp,
+        ctypes.c_char_p,
+        ctypes.c_size_t,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_char_p,
+        vp,
+    ]
+    lib.shaderc_result_get_compilation_status.restype = ctypes.c_int
+    lib.shaderc_result_get_error_message.restype = ctypes.c_char_p
+    lib.shaderc_result_get_length.restype = ctypes.c_size_t
+    lib.shaderc_result_get_bytes.restype = vp
+    lib.shaderc_result_release.argtypes = [vp]
+    return lib
+
+
+def stage_of(args: dict) -> int:
+    if args["stage"]:
+        key = "." + args["stage"]
+    else:
+        key = Path(args["input"]).suffix.lower()
+    if key not in KIND:
+        fail(f"cannot infer shader stage from {args['input']}")
+    return KIND[key]
+
+
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
+    source = Path(args["input"]).read_bytes()
+    lib = load_shaderc()
+
+    compiler = lib.shaderc_compiler_initialize()
+    if not compiler:
+        fail("shaderc_compiler_initialize failed")
+    options = lib.shaderc_compile_options_initialize()
+    if not options:
+        fail("shaderc_compile_options_initialize failed")
+    lib.shaderc_compile_options_set_target_env(options, TARGET_VULKAN, ENV_VULKAN_1_1)
+    if args["opt"]:
+        lib.shaderc_compile_options_set_optimization_level(options, OPT_PERFORMANCE)
+
+    name = Path(args["input"]).name.encode()
+    result = lib.shaderc_compile_into_spv(
+        compiler, source, len(source), stage_of(args), name, b"main", options
+    )
+    if not result:
+        fail("shaderc_compile_into_spv failed")
+    status = lib.shaderc_result_get_compilation_status(result)
+    if status != 0:  # shaderc_compilation_status_success
+        msg = lib.shaderc_result_get_error_message(result)
+        print((msg or b"compilation failed").decode(errors="replace"), file=sys.stderr)
+        lib.shaderc_result_release(result)
+        lib.shaderc_compile_options_release(options)
+        lib.shaderc_compiler_release(compiler)
+        return 1
+
+    length = lib.shaderc_result_get_length(result)
+    data = ctypes.string_at(lib.shaderc_result_get_bytes(result), length)
+    lib.shaderc_result_release(result)
+    lib.shaderc_compile_options_release(options)
+    lib.shaderc_compiler_release(compiler)
+
+    if length % 4:
+        fail("SPIR-V length is not a multiple of four")
+    words = [int.from_bytes(data[i : i + 4], "little") for i in range(0, length, 4)]
+    text = "{" + ",".join(f"0x{w:08x}" for w in words) + "}\n"
+    Path(args["output"]).write_text(text)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

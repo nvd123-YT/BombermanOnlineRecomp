@@ -1,0 +1,65 @@
+# Bomberman Online (USA), MK-51065 V1.004 (20011004) -- dreamcomp game config.
+# Format: dreamcomp/engine/docs/game-config.md. Measured on the owner's GD-ROM CHD; never commit
+# disc data. The boot file is stored plain on a retail GD-ROM (no MIL-CD descrambling needed):
+# SHA-256 5e01678b... is the CHD, SHA-1 below is the plain 1ST_READ.BIN.
+
+[game]
+id = "bomberman_online"
+title = "Bomberman Online"
+region = "USA"
+product = "MK-51065"
+symbols = "symbols.tsv"
+
+[disc]
+sha1_1st_read = "26fb8164ab585714bf384eadcfe97734d212240d"
+
+[binary]
+path = "extracted/fs/1ST_READ.BIN"   # written by tools/dc.py setup, git-ignored
+load_address = 0x8C010000            # where the BIOS loads the boot file
+link_address = 0x0C010000            # what the literal pools assume (P0 alias of same RAM)
+entry = 0x8C010000                   # first instruction (a nop-padded Katana loader stub)
+
+# Discovery seeds reported by runs (suggested.toml). These are call targets the
+# translator did not find; they sit inside the image, not in a copied region.
+# 0x0C1EA932/3C/A04/A16 were first reached in the windowed run once the expansion-device
+# probes returned "device absent" (0xFFFFFFFF), which changed the modem/BBA control flow.
+[functions]
+extra = [0x0C0F85AE,  # called 498 times in the first run
+         0x0C0F85C2,  # called 582 times
+         0x0C0F85CE,  # called 1076 times
+         0x0C0A40EE,  # called 1 time; the last untranslated target after the relocations
+         0x0C1EA932,  # called 1 time; reached once modem probe returns 0xFFFFFFFF
+         0x0C1EA93C,  # called 1 time
+         0x0C1EAA04,  # called 1 time
+         0x0C1EAA16]  # called 1 time
+
+# Regions the program copied out of the image and ran elsewhere (first 600-frame run). The
+# 0x8C000000/0x8C000100/0x8C000400/0x8C000600 group is the exception/interrupt entry area; the
+# 0x8C00F3FC region is the Katana system-variable / handler block. Each was matched byte-for-byte
+# against the image by the runtime, so the source offsets are measured, not guessed.
+[[relocations]]  # RAM 0x8C000000 reproduces image 0x0C22E970 for 52 bytes
+source = 0x0C22E970
+size = 0x34
+dest = 0x8C000000
+
+[[relocations]]  # RAM 0x8C000100 reproduces image 0x0C22E8DC for 52 bytes
+source = 0x0C22E8DC
+size = 0x34
+dest = 0x8C000100
+
+[[relocations]]  # RAM 0x8C000400 reproduces image 0x0C22E8DC for 52 bytes
+source = 0x0C22E8DC
+size = 0x34
+dest = 0x8C000400
+
+[[relocations]]  # RAM 0x8C000600 reproduces image 0x0C22E914 for 88 bytes
+source = 0x0C22E914
+size = 0x58
+dest = 0x8C000600
+
+[[relocations]]  # RAM 0x8C00F3FC reproduces image 0x0C1BE6A4 for 716 bytes
+source = 0x0C1BE6A4
+size = 0x2CC
+dest = 0x8C00F3FC
+
+# [hooks]: see dreamcomp docs/HOOKS.md.

@@ -1,0 +1,64 @@
+{
+  "name": "bomberman-online-launcher",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Cross-platform launcher for the Bomberman Online native recompilation.",
+  "main": "main.js",
+  "homepage": "https://github.com/nvd123-YT/BombermanOnlineRecomp",
+  "author": {
+    "name": "nvd123-YT",
+    "email": "nvd123-yt@users.noreply.github.com"
+  },
+  "scripts": {
+    "start": "electron .",
+    "selftest": "electron . --selftest",
+    "sync": "node sync.js",
+    "package": "node sync.js && electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.bomberman-online.launcher",
+    "productName": "Bomberman Online Launcher",
+    "asar": false,
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "tar.gz"
+      ],
+      "maintainer": "nvd123-YT <nvd123-yt@users.noreply.github.com>"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "ui/**",
+      "node_modules/**",
+      "package.json",
+      "dreamcomp/**",
+      "game/**",
+      "build/game/**",
+      "src/**",
+      "CMakeLists.txt",
+      "README.md",
+      "LICENSE"
+    ],
+    "directories": {
+      "output": "dist"
+    }
+  }
+}

@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bomberman Online — Launcher</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header id="titlebar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">B</div>
+      <div class="brand-text">
+        <h1>Bomberman Online</h1>
+        <p>Sega Dreamcast · native static recompilation</p>
+      </div>
+    </div>
+    <div class="titlebar-right">
+      <div id="padChip" class="chip" title="Controller status">
+        <span class="dot"></span><span id="padChipText">No controller</span>
+      </div>
+      <div id="chipBuild" class="chip">Build: checking…</div>
+      <div id="chipRenderer" class="chip">Renderer: checking…</div>
+      <div class="winctl" id="winctl">
+        <button data-win="minimize" aria-label="Minimize">&#8211;</button>
+        <button data-win="maximize" aria-label="Maximize">&#9633;</button>
+        <button data-win="close" class="close" aria-label="Close">&#215;</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="scroll">
+    <!-- Disc ------------------------------------------------------------->
+    <section class="card">
+      <div class="card-head">
+        <h2>Game disc</h2>
+        <span class="hint">CHD · GDI · CUE · CDI</span>
+      </div>
+      <button id="discDrop" class="disc-drop" data-nav>
+        <span class="disc-icon" aria-hidden="true">◉</span>
+        <span class="disc-info">
+          <span id="discName" class="disc-name">Choose your Bomberman Online disc image</span>
+          <span id="discMeta" class="disc-meta">No disc selected</span>
+        </span>
+        <span class="btn btn-ghost">Browse…</span>
+      </button>
+      <div class="row">
+        <button id="detectBtn" class="btn btn-ghost" data-nav>Auto-detect disc</button>
+        <span id="discStatus" class="status-line">Waiting for a disc image.</span>
+      </div>
+    </section>
+
+    <!-- Launch ----------------------------------------------------------->
+    <section class="launch">
+      <button id="playBtn" class="play-btn" data-nav>
+        <span class="play-icon" aria-hidden="true">▶</span>
+        <span class="play-text">
+          <strong>Play</strong>
+          <small id="playSub">Launch the game window</small>
+        </span>
+      </button>
+      <div class="launch-side">
+        <button id="headlessBtn" class="btn" data-nav>Headless report</button>
+        <button id="buildBtn" class="btn" data-nav>Build</button>
+        <button id="stopBtn" class="btn btn-danger" data-nav disabled>Stop</button>
+      </div>
+    </section>
+
+    <div class="grid">
+      <!-- Graphics ------------------------------------------------------>
+      <section class="card">
+        <div class="card-head">
+          <h2>Graphics</h2>
+          <span id="renderOut" class="hint mono">640 × 480</span>
+        </div>
+
+        <div class="field">
+          <label id="resLabel">Resolution preset</label>
+          <div class="pills" id="resPills" role="group" aria-labelledby="resLabel">
+            <button data-preset="native">Native</button>
+            <button data-preset="720p">720p</button>
+            <button data-preset="1080p">1080p</button>
+            <button data-preset="1440p">1440p</button>
+            <button data-preset="4k">4K</button>
+            <button data-preset="8k">8K</button>
+          </div>
+        </div>
+
+        <div class="field two">
+          <div>
+            <label for="scaleRange">Render scale <span id="scaleVal" class="mono">1×</span></label>
+            <input id="scaleRange" type="range" min="1" max="8" step="1" value="1" />
+          </div>
+          <div>
+            <label for="aspectSel">Aspect ratio</label>
+            <select id="aspectSel">
+              <option value="native">Native 4:3</option>
+              <option value="wide">Widescreen 16:9</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="toggles">
+          <label class="toggle"><input type="checkbox" id="vsync" /><span>vSync</span></label>
+          <label class="toggle"><input type="checkbox" id="fullscreen" /><span>Fullscreen</span></label>
+          <label class="toggle"><input type="checkbox" id="fps" /><span>Show FPS</span></label>
+          <label class="toggle"><input type="checkbox" id="audio" /><span>Sound</span></label>
+        </div>
+      </section>
+
+      <div class="stack">
+        <!-- Online ------------------------------------------------------>
+        <section class="card">
+          <div class="card-head">
+            <h2>Online</h2>
+            <span class="hint">DCNet transport</span>
+          </div>
+
+          <label class="switch-row">
+            <input type="checkbox" id="online" />
+            <span>Enable online multiplayer</span>
+          </label>
+
+          <div class="field two">
+            <div>
+              <label for="connSel">Connection type</label>
+              <select id="connSel">
+                <option value="bba">BBA (broadband)</option>
+                <option value="modem">Modem (dial-up)</option>
+                <option value="pppoe">PPPoE</option>
+              </select>
+            </div>
+            <div>
+              <label for="serverPort">Server port</label>
+              <input id="serverPort" inputmode="numeric" placeholder="7655" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="serverInput">DCNet server</label>
+            <input id="serverInput" placeholder="dcnet.flyca.st" spellcheck="false" />
+          </div>
+          <p class="note">DCNet access points need no account or password. Your game login, if any,
+            is entered inside Bomberman Online.</p>
+
+          <div class="row">
+            <button id="testNetBtn" class="btn btn-ghost" data-nav>Test connection</button>
+            <span id="netStatus" class="status-line">Not tested</span>
+          </div>
+          <p id="netNote" class="note"></p>
+        </section>
+
+        <!-- Controls ---------------------------------------------------->
+        <section class="card">
+          <div class="card-head">
+            <h2>Controls</h2>
+            <span id="padName" class="hint">Keyboard</span>
+          </div>
+          <div class="row wrap">
+            <button id="remapBtn" class="btn" data-nav>Remap controls…</button>
+            <button id="padTestBtn" class="btn btn-ghost" data-nav>Controller test</button>
+          </div>
+          <p class="note">In-game F1 rebinds. In the launcher: D-pad moves, A selects, B closes dialogs.</p>
+          <div id="padTest" class="pad-test" hidden>
+            <div class="pad-col">
+              <span class="pad-label">Buttons</span>
+              <div id="padButtons" class="pad-buttons"></div>
+            </div>
+            <div class="pad-col">
+              <span class="pad-label">Axes</span>
+              <div id="padAxes" class="pad-axes"></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <!-- Output log: pinned to the bottom, collapsible ---------------------->
+  <section id="logpanel" class="card logs">
+    <div class="card-head">
+      <button id="logToggle" class="log-toggle" aria-expanded="true">
+        <span class="chev">▾</span> Output
+      </button>
+      <div class="row tight">
+        <label class="mini"><input type="checkbox" id="autoScroll" checked /> Auto-scroll</label>
+        <button id="clearLog" class="btn btn-tiny" data-nav>Clear</button>
+        <button id="copyLog" class="btn btn-tiny" data-nav>Copy</button>
+      </div>
+    </div>
+    <pre id="log" class="log" aria-live="polite"></pre>
+  </section>
+
+  <footer id="statusbar">
+    <span id="statusLeft">Ready</span>
+    <span class="status-sep">•</span>
+    <span id="statusRight">launcher 2.0</span>
+  </footer>
+
+  <!-- Remap dialog ------------------------------------------------------->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <header>
+        <div>
+          <h2 id="modalTitle">Remap controls</h2>
+          <p class="note">Choose a control, press Bind, then press a key or controller button.</p>
+        </div>
+        <button id="modalClose" class="btn btn-tiny" aria-label="Close">×</button>
+      </header>
+      <div id="bindRows" class="bind-rows"></div>
+      <footer>
+        <button id="bindReset" class="btn btn-ghost" data-nav>Reset to defaults</button>
+        <span class="spacer"></span>
+        <button id="bindCancel" class="btn btn-ghost" data-nav>Cancel</button>
+        <button id="bindSave" class="btn btn-accent" data-nav>Save</button>
+      </footer>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

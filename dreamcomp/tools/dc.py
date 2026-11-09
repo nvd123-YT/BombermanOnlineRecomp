@@ -1,0 +1,568 @@
+#!/usr/bin/env python3
+"""dreamcomp workflow CLI: one entry point for humans and for Claude.
+
+    python tools/dc.py doctor                         what this machine has / lacks
+    python tools/dc.py deps                           fetch SDL3 into .deps/ (Windows: VC devel zip)
+    python tools/dc.py setup  <port> --disc <image>   verify the disc, extract the boot binary into
+                                                      <port>/game/extracted/, remember the image path
+    python tools/dc.py build  <port> [--target T] [--fresh] [--headless]
+    python tools/dc.py run    <port> [--window] [-- launcher args...]
+    python tools/dc.py shots  <port> --at 120,300,900 [--press start@600] [--out DIR] [--scale N]
+                                                      windowed screenshots at presented frames, plus a
+                                                      contact sheet (sheet.png) -- the cheapest way to
+                                                      see where a boot gets to
+    python tools/dc.py report <port> [--frames N] [--press ...]   headless run report (stdout)
+
+<port> is a port repository directory (ports/<slug>). Builds go to <port>/build. On Windows every
+compiler call runs inside the Visual Studio developer environment, found with vswhere.
+Machine-local state (the disc path) lives in <port>/.dreamcomp/local.json, which is git-ignored.
+"""
+from __future__ import annotations
+
+import argparse
+import glob
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import threading
+import sys
+import tempfile
+import urllib.request
+import zipfile
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEPS = os.path.join(ROOT, ".deps")
+SDL3_VERSION = "3.4.18"
+IS_WIN = os.name == "nt"
+EXE = ".exe" if IS_WIN else ""
+
+
+# ---------------------------------------------------------------------------------------------
+# environment
+
+def vcvars() -> str | None:
+    if not IS_WIN:
+        return None
+    vswhere = os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe")
+    if os.path.exists(vswhere):
+        out = subprocess.run([vswhere, "-latest", "-products", "*", "-property", "installationPath"],
+                             capture_output=True, text=True).stdout.strip()
+        for line in out.splitlines():
+            p = os.path.join(line, r"VC\Auxiliary\Build\vcvars64.bat")
+            if os.path.exists(p):
+                return p
+    return None
+
+
+_ENV_CACHE: dict | None = None
+
+
+def build_env() -> dict:
+    """os.environ plus the MSVC developer environment on Windows (cached per process)."""
+    global _ENV_CACHE
+    if _ENV_CACHE is not None:
+        return _ENV_CACHE
+    env = dict(os.environ)
+    vc = vcvars()
+    if vc:
+        out = subprocess.run(f'cmd /s /c ""{vc}" >nul && set"', capture_output=True, text=True, shell=True).stdout
+        for line in out.splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                env[k] = v
+    vk = glob.glob(r"C:\VulkanSDK\*") if IS_WIN else []
+    if vk and "VULKAN_SDK" not in env:
+        env["VULKAN_SDK"] = sorted(vk)[-1]
+    _ENV_CACHE = env
+    return env
+
+
+def run(cmd: list[str], cwd: str | None = None, check: bool = True, env: dict | None = None) -> int:
+    print("+ " + " ".join(f'"{c}"' if " " in c else c for c in cmd), flush=True)
+    r = subprocess.run(cmd, cwd=cwd, env=env or build_env())
+    if check and r.returncode != 0:
+        sys.exit(f"command failed with exit code {r.returncode}")
+    return r.returncode
+
+
+# ---------------------------------------------------------------------------------------------
+# port helpers
+
+def port_info(port: str) -> dict:
+    port = os.path.abspath(port)
+    # Walk up from port looking for the repo root: must have both game/<id>.toml AND CMakeLists.txt
+    for _ in range(20):
+        tomls = glob.glob(os.path.join(port, "game", "*.toml"))
+        tomls = [t for t in tomls if not t.endswith("suggested.toml")]
+        if tomls and os.path.exists(os.path.join(port, "CMakeLists.txt")):
+            break
+        parent = os.path.dirname(port)
+        if parent == port:
+            break
+        port = parent
+    if not tomls or not os.path.exists(os.path.join(port, "CMakeLists.txt")):
+        sys.exit(f"{original}: expected a directory with game/<id>.toml and CMakeLists.txt, found {port}")
+    gid = os.path.splitext(os.path.basename(tomls[0]))[0]
+    local_path = os.path.join(port, ".dreamcomp", "local.json")
+    local = json.load(open(local_path)) if os.path.exists(local_path) else {}
+    exe_candidates = glob.glob(os.path.join(port, "build", "game", f"*{EXE}"))
+    # On non-Windows EXE is "" so glob matches everything in build/game/; drop source/object
+    # files so we don't accidentally launch a .cpp instead of the built binary.
+    _src_exts = (".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", ".o", ".a", ".d", ".txt", ".log",
+                 ".py", ".sh", ".json", ".toml", ".bin", ".chd", ".gdi", ".cue", ".cdi")
+    exe_candidates = [e for e in exe_candidates if not e.endswith(_src_exts)]
+    exe = next((e for e in exe_candidates if os.path.isfile(e) and (not IS_WIN or e.endswith(".exe"))), None)
+    return {"dir": port, "id": gid, "toml": tomls[0], "local": local, "local_path": local_path, "exe": exe}
+
+
+def save_local(info: dict) -> None:
+    os.makedirs(os.path.dirname(info["local_path"]), exist_ok=True)
+    with open(info["local_path"], "w") as f:
+        json.dump(info["local"], f, indent=2)
+
+
+def dcdisc_env() -> dict:
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.path.join(ROOT, "engine", "tools", "dcdisc") + os.pathsep + env.get("PYTHONPATH", "")
+    return env
+
+
+# ---------------------------------------------------------------------------------------------
+# commands
+
+def cmd_doctor(_a) -> int:
+    env = build_env()
+    rows = []
+
+    def have(name, ok, note=""):
+        rows.append((name, "ok" if ok else "MISSING", note))
+
+    for tool in ("git", "cmake", "ninja", "python"):
+        have(tool, shutil.which(tool, path=env.get("PATH")) is not None)
+    cc = "clang-cl" if IS_WIN else "clang++"
+    have(cc, shutil.which(cc, path=env.get("PATH")) is not None, "C++20 compiler")
+    if IS_WIN:
+        have("MSVC environment (vcvars64)", vcvars() is not None, "Visual Studio 2022 Build Tools: Windows SDK + linker")
+    glslc = shutil.which("glslc", path=env.get("PATH")) or (
+        os.path.join(env["VULKAN_SDK"], "Bin", "glslc.exe") if env.get("VULKAN_SDK") else None)
+    have("Vulkan SDK / glslc", bool(glslc and os.path.exists(glslc)), "winget install KhronosGroup.VulkanSDK")
+    have("SDL3", bool(glob.glob(os.path.join(DEPS, "SDL3-*"))) or not IS_WIN, "python tools/dc.py deps")
+    try:
+        import pycdlib  # noqa: F401  (dcdisc tests)
+        have("pycdlib (dcdisc tests)", True)
+    except ImportError:
+        have("pycdlib (dcdisc tests)", False, "pip install -e engine/tools/dcdisc[test]")
+    w = max(len(r[0]) for r in rows)
+    for name, st, note in rows:
+        print(f"{name:<{w}}  {st:<7}  {note}")
+    return 0 if all(r[1] == "ok" for r in rows) else 1
+
+
+def cmd_deps(_a) -> int:
+    os.makedirs(DEPS, exist_ok=True)
+    if IS_WIN:
+        dst = os.path.join(DEPS, f"SDL3-{SDL3_VERSION}")
+        if os.path.isdir(dst):
+            print(f"SDL3 {SDL3_VERSION} already in {dst}")
+            return 0
+        url = (f"https://github.com/libsdl-org/SDL/releases/download/release-{SDL3_VERSION}/"
+               f"SDL3-devel-{SDL3_VERSION}-VC.zip")
+        zpath = os.path.join(DEPS, "sdl3.zip")
+        print(f"downloading {url}")
+        urllib.request.urlretrieve(url, zpath)
+        with zipfile.ZipFile(zpath) as z:
+            z.extractall(DEPS)
+        os.remove(zpath)
+        print(f"SDL3 -> {dst}")
+        return 0
+    print("Linux/macOS: install SDL3 from your package manager (e.g. `brew install sdl3`, "
+          "`apt install libsdl3-dev`) or build it from source; CMake finds it on the default prefix.")
+    return 0
+
+
+def _libchdr_names() -> list[str]:
+    if IS_WIN:
+        return ["chdr.dll", "libchdr.dll", "chdr-static.dll"]
+    if sys.platform == "darwin":
+        return ["libchdr.dylib", "libchdr.0.dylib"]
+    return ["libchdr.so", "libchdr.so.0"]
+
+
+def ensure_libchdr(disc: str) -> None:
+    """Make .chd images readable without asking the user to install anything.
+
+    dcdisc delegates hunk decompression to libchdr (or MAME's chdman). libchdr is vendored, so
+    build its shared library once into <dreamcomp>/build-libchdr and point dcdisc at it. This runs
+    on every platform: the output is chdr.dll on Windows, libchdr.dylib on macOS, libchdr.so on
+    Linux. .gdi/.cue images need none of this, and an explicit DCDISC_LIBCHDR always wins.
+    """
+    if not disc.lower().endswith(".chd") or os.environ.get("DCDISC_LIBCHDR"):
+        return
+    bdir = os.path.join(ROOT, "build-libchdr")
+    for name in _libchdr_names():
+        found = glob.glob(os.path.join(bdir, "**", name), recursive=True)
+        if found:
+            os.environ["DCDISC_LIBCHDR"] = found[0]
+            return
+    src = os.path.join(ROOT, "engine", "third_party", "libchdr")
+    if not os.path.isdir(src):
+        return
+    print("libchdr has not been built here yet; building it once so .chd images can be read...",
+          flush=True)
+    cfg = ["cmake", "-S", src, "-B", bdir, "-DCMAKE_BUILD_TYPE=Release",
+           "-DCHDR_WANT_TESTS=OFF", "-DBUILD_SHARED_LIBS=ON"]
+    if IS_WIN:
+        cfg += ["-DCMAKE_C_COMPILER=clang-cl"]
+    try:
+        if run(cfg, check=False) != 0:
+            print("warning: could not configure libchdr; .chd extraction may fail", flush=True)
+            return
+        if run(["cmake", "--build", bdir, "--config", "Release", "--parallel", "4"],
+               check=False) != 0:
+            print("warning: could not build libchdr; .chd extraction may fail", flush=True)
+            return
+    except OSError as exc:
+        print(f"warning: cmake is not available ({exc}); .chd extraction may fail. "
+              "Use a .gdi/.cue image, install chdman, or install CMake.", flush=True)
+        return
+    for name in _libchdr_names():
+        found = glob.glob(os.path.join(bdir, "**", name), recursive=True)
+        if found:
+            os.environ["DCDISC_LIBCHDR"] = found[0]
+            print(f"libchdr -> {found[0]}")
+            return
+
+
+def cmd_setup(a) -> int:
+    info = port_info(a.port)
+    disc = os.path.abspath(a.disc)
+    ensure_libchdr(disc)
+    from_toml = open(info["toml"], encoding="utf-8").read()
+    want = None
+    for line in from_toml.splitlines():
+        if line.strip().startswith("sha1_1st_read"):
+            want = line.split("=", 1)[1].split("#")[0].strip().strip('"')
+    # Only the boot executable is extracted: the translator needs it at build time, and at run
+    # time everything else is read off the disc image itself.
+    sys.path.insert(0, os.path.join(ROOT, "engine", "tools", "dcdisc"))
+    from dcdisc import open_image
+    from dcdisc.ipbin import parse_ipbin, read_ipbin
+    from dcdisc.iso9660 import Iso9660
+    from dcdisc.scramble import descramble
+    with open_image(disc) as img:
+        ip = parse_ipbin(read_ipbin(img))
+        data = Iso9660(img).read_path(ip.boot_filename)
+    if ip.hardware_id.startswith("SEGA SEGAKATANA") is False:
+        print(f"warning: IP.BIN hardware id is {ip.hardware_id!r}")
+    got = hashlib.sha1(data).hexdigest()
+    if want and got != want and hashlib.sha1(descramble(data)).hexdigest() == want:
+        data, got = descramble(data), want  # MIL-CD style scrambled boot file
+    out = os.path.join(info["dir"], "game", "extracted", "fs")
+    os.makedirs(out, exist_ok=True)
+    boot = os.path.join(out, "1ST_READ.BIN")
+    with open(boot, "wb") as f:
+        f.write(data)
+    print(f"{ip.title} {ip.product_number} {ip.product_version}: boot file {ip.boot_filename}, "
+          f"{len(data)} bytes -> {boot}")
+    if want and got != want:
+        sys.exit(f"boot binary SHA-1 {got} does not match this port ({want}): wrong release or revision")
+    print(f"boot binary verified: sha1 {got}")
+    info["local"]["disc"] = disc
+    save_local(info)
+    print(f"disc path remembered in {info['local_path']}")
+    return 0
+
+
+_heartbeat_stop = threading.Event()
+
+
+def _heartbeat(label: str, bdir: str | None = None) -> None:
+    """Print a full line every 15 seconds while the build runs.
+
+    The old version overwrote one line with `\\r`. The launcher reads stdout line by line, so
+    nothing appeared there and the UI sat on the last real line (97%) for the whole compile.
+    """
+    import glob as _g
+    import time as _t
+    start = _t.time()
+    while not _heartbeat_stop.wait(15):
+        mins, secs = divmod(int(_t.time() - start), 60)
+        parts = ""
+        if bdir:
+            # CMake's own counter parks near 97% while the generated units compile: it counts
+            # targets, and they are the last eight steps. Object files appear as each part
+            # finishes, which is the progress the user actually wants.
+            total = len(_g.glob(os.path.join(bdir, "game", "gen", "*_part*.cpp")))
+            done = len(_g.glob(os.path.join(bdir, "game", "CMakeFiles", "*", "gen", "*_part*.o")))
+            if total:
+                parts = f", {done}/{total} generated parts compiled"
+        print(f"[build] {label}: still working ({mins}m{secs:02d}s elapsed){parts}", flush=True)
+
+
+class _BuildLock:
+    """One build per repository.
+
+    Two `dc.py build` invocations (a Play click while a terminal build runs, or two launcher
+    windows) each start a translation and a compiler over the same multi-hundred-megabyte units.
+    They fight over the same output files and the machine swaps; the build looks frozen at 97%
+    with two clang processes at 4% CPU. Wait for the holder instead of starting a second one.
+    """
+
+    def __init__(self, path: str):
+        self.path = path
+        self.fh = None
+
+    def __enter__(self):
+        import time as _t
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        self.fh = open(self.path, "a+")
+        announced = False
+        while True:
+            try:
+                if IS_WIN:
+                    import msvcrt
+                    self.fh.seek(0)
+                    if os.path.getsize(self.path) == 0:
+                        self.fh.write("0")
+                        self.fh.flush()
+                    self.fh.seek(0)
+                    msvcrt.locking(self.fh.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.fh.seek(0)
+                self.fh.truncate()
+                self.fh.write(str(os.getpid()))
+                self.fh.flush()
+                return self
+            except OSError:
+                if not announced:
+                    print("[build] another build is already running here; waiting for it...",
+                          flush=True)
+                    announced = True
+                _t.sleep(3)
+
+    def __exit__(self, *_exc):
+        if self.fh is not None:
+            self.fh.close()  # closing releases the advisory lock
+            self.fh = None
+
+
+def _total_ram_gb():
+    try:
+        if sys.platform == "darwin":
+            return int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]).strip()) / 1024**3
+        if not IS_WIN:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemTotal:"):
+                        return int(line.split()[1]) / 1024**2
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def _build_jobs() -> str:
+    """Cap parallel compiles.
+
+    Each generated part peaks well over a gigabyte inside clang. Four at once on an 8 GB machine
+    makes the kernel kill compilers (`Killed: 9`) and the build fails halfway; the earlier single
+    unit hid this by being unable to run in parallel at all. Budget ~3 GB per job.
+    """
+    override = os.environ.get("DREAM_BUILD_JOBS")
+    if override:
+        return override
+    jobs = min(os.cpu_count() or 4, 4)
+    ram = _total_ram_gb()
+    if ram:
+        jobs = min(jobs, max(1, int(ram // 3)))
+    return str(max(1, jobs))
+
+
+def _keep_awake():
+    """Hold off idle sleep on macOS while a build runs.
+
+    A sleeping machine pauses every compiler process. The build then reports hours of elapsed
+    time with minutes of CPU used, which is exactly what a hung build looks like. `caffeinate -w`
+    releases the assertion when this process exits.
+    """
+    if sys.platform != "darwin" or os.environ.get("DREAM_NO_CAFFEINE"):
+        return None
+    try:
+        return subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return None
+
+
+# In dc.py cmd_build, the generator defaults to Ninja. When running from a packaged app's sandbox the
+# Xcode Command Line Tools cmake may not be on PATH, so fall back to Unix Makefiles in that case.
+# This matches the repo's documented build and the CMakeCache that parks at 97% with Make.
+def _ninja_available() -> bool:
+    import shutil
+    return shutil.which("ninja") is not None
+
+def cmd_build(a) -> int:
+    info = port_info(a.port)
+    bdir = os.path.join(info["dir"], "build")
+    lock_path = os.path.join(info["dir"], ".dreamcomp", "build.lock")
+    with _BuildLock(lock_path):
+        if a.fresh and os.path.isdir(bdir):
+            shutil.rmtree(bdir)
+        if not os.path.exists(os.path.join(bdir, "CMakeCache.txt")):
+            gen = "Ninja" if _ninja_available() else "Unix Makefiles"
+            cfg = ["cmake", "-S", info["dir"], "-B", bdir, "-G", gen,
+                   "-DCMAKE_BUILD_TYPE=Release", f"-DDREAMCOMP_DIR={ROOT}"]
+            if IS_WIN:
+                cfg += ["-DCMAKE_C_COMPILER=clang-cl", "-DCMAKE_CXX_COMPILER=clang-cl"]
+            if a.headless:
+                cfg += ["-DDREAM_RENDERER=OFF"]
+            run(cfg)
+
+        target = a.target or f"{info['id']}_boot"
+        jobs = _build_jobs()
+
+        _heartbeat_stop.clear()
+        hb = threading.Thread(target=_heartbeat, args=(f"building {target}", bdir), daemon=True)
+        hb.start()
+        awake = _keep_awake()
+        try:
+            rc = run(["cmake", "--build", bdir, "--target", target, "--parallel", jobs])
+            if rc != 0:
+                # Target-specific build failed (e.g. headless platforms lack renderer targets);
+                # fall back to building everything.
+                rc = run(["cmake", "--build", bdir, "--parallel", jobs])
+            return rc
+        finally:
+            _heartbeat_stop.set()
+            hb.join(timeout=2)
+            if awake is not None:
+                awake.terminate()
+
+
+def launcher_args(info: dict, extra: list[str]) -> list[str]:
+    exe = info["exe"]
+    if not exe:
+        sys.exit("no executable yet: python tools/dc.py build <port>")
+    args = [exe, "--config", info["toml"]]
+    if info["local"].get("disc") and "--disc" not in extra:
+        args += ["--disc", info["local"]["disc"]]
+    return args + extra
+
+
+def cmd_run(a) -> int:
+    info = port_info(a.port)
+    extra = list(a.args)
+    if extra and extra[0] == "--":
+        extra = extra[1:]
+    if a.window:
+        extra = ["--window"] + extra
+    return run(launcher_args(info, extra), cwd=a.cwd or info["dir"], check=False, env=dict(os.environ))
+
+
+def cmd_report(a) -> int:
+    info = port_info(a.port)
+    extra = ["--max-frames", str(a.frames), "--rtc-seed", "1000000", "--no-audio"]
+    if a.press:
+        extra += ["--press", a.press]
+    extra += a.extra
+    return run(launcher_args(info, extra), cwd=info["dir"], check=False, env=dict(os.environ))
+
+
+# Launcher flags whose value is a file or folder. `run` and `report` start the game in the port's
+# folder, so a relative path written from the dreamcomp checkout (as the skills do) would land
+# somewhere that does not exist, and the engine's "cannot write" is easy to miss: make such paths
+# absolute against the caller's directory first.
+FILE_FLAGS = {"--suggest-config", "--profile", "--wav", "--report", "--dump-ta", "--dump-vram",
+              "--dump-flash", "--dump-aram", "--sample-file", "--settings", "--vmu", "--bindings",
+              "--texture-pack", "--dump-textures", "--mod", "--disc", "--flash", "--capture-dir"}
+
+
+def absolute_file_args(extra):
+    out = list(extra)
+    for i in range(len(out) - 1):
+        if out[i] in FILE_FLAGS and not os.path.isabs(out[i + 1]):
+            out[i + 1] = os.path.abspath(out[i + 1])
+    return out
+
+
+def cmd_shots(a) -> int:
+    info = port_info(a.port)
+    out = os.path.abspath(a.out or os.path.join(info["dir"], "shots"))
+    os.makedirs(out, exist_ok=True)
+    frames = sorted({int(x) for x in a.at.split(",")})
+    made = []
+    with tempfile.TemporaryDirectory() as tmp:
+        # One run, every shot (--screenshot-at takes a list). --max-frames counts guest frames and
+        # --screenshot-at presented ones; the guest runs ahead of presentation, so leave headroom.
+        extra = ["--window", "--no-audio", "--unthrottled", "--present-mode", "immediate",
+                 "--rtc-seed", "1000000", "--screenshot-at", ",".join(map(str, frames)),
+                 "--max-frames", str(int(frames[-1] * 1.25) + 120), "--scale", str(a.scale)]
+        if a.press:
+            extra += ["--press", a.press]
+        extra += a.extra
+        run(launcher_args(info, extra), cwd=tmp, check=False, env=dict(os.environ))
+        shots = sorted(glob.glob(os.path.join(tmp, "screenshot-*.ppm")))
+        if len(shots) < len(frames):
+            print(f"only {len(shots)} of {len(frames)} screenshots (run ended first?)")
+        for n, src in zip(frames, shots):
+            dst = os.path.join(out, f"frame_{n:05d}.png")
+            try:
+                from PIL import Image
+                Image.open(src).save(dst)
+            except ImportError:
+                dst = dst[:-4] + ".ppm"
+                shutil.copy(src, dst)
+            made.append((n, dst))
+    try:
+        from PIL import Image, ImageDraw
+        ims = [(n, Image.open(p).convert("RGB")) for n, p in made]
+        if ims:
+            w, h = 320, 240
+            cols = min(4, len(ims))
+            rows = (len(ims) + cols - 1) // cols
+            sheet = Image.new("RGB", (cols * w, rows * h))
+            for i, (n, im) in enumerate(ims):
+                cell = im.resize((w, h))
+                ImageDraw.Draw(cell).text((4, 4), f"f{n}", fill=(255, 255, 0))
+                sheet.paste(cell, ((i % cols) * w, (i // cols) * h))
+            sheet.save(os.path.join(out, "sheet.png"))
+            print(f"contact sheet: {os.path.join(out, 'sheet.png')}")
+    except ImportError:
+        print("pip install pillow for PNG output and the contact sheet")
+    return 0
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("doctor").set_defaults(fn=cmd_doctor)
+    sub.add_parser("deps").set_defaults(fn=cmd_deps)
+    s = sub.add_parser("setup"); s.add_argument("port"); s.add_argument("--disc", required=True)
+    s.set_defaults(fn=cmd_setup)
+    s = sub.add_parser("build"); s.add_argument("port"); s.add_argument("--target")
+    s.add_argument("--fresh", action="store_true"); s.add_argument("--headless", action="store_true")
+    s.set_defaults(fn=cmd_build)
+    s = sub.add_parser("run"); s.add_argument("port"); s.add_argument("--window", action="store_true")
+    s.add_argument("--cwd"); s.add_argument("args", nargs=argparse.REMAINDER)
+    s.set_defaults(fn=cmd_run)
+    s = sub.add_parser("report"); s.add_argument("port"); s.add_argument("--frames", type=int, default=1800)
+    s.add_argument("--press"); s.set_defaults(fn=cmd_report)
+    s = sub.add_parser("shots"); s.add_argument("port"); s.add_argument("--at", required=True)
+    s.add_argument("--press"); s.add_argument("--out"); s.add_argument("--scale", type=int, default=1)
+    s.set_defaults(fn=cmd_shots)
+    # Everything after a bare `--` goes to the launcher untouched (shots, report).
+    argv = list(sys.argv[1:] if argv is None else argv)
+    extra = []
+    if "--" in argv and argv[0] != "run":
+        cut = argv.index("--")
+        argv, extra = argv[:cut], argv[cut + 1:]
+    a = ap.parse_args(argv)
+    a.extra = absolute_file_args(extra)
+    return a.fn(a)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
