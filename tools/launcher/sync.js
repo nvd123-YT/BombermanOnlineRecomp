@@ -43,17 +43,22 @@ for (const name of ENTRIES) {
 const local = path.join(HERE, "game", ".dreamcomp");
 fs.rmSync(local, { recursive: true, force: true });
 
-// Include the compiled game binary so the launcher can run it immediately
-// without requiring a build step. This makes the pre-built release experience
-// seamless: download, click Play, and the game starts.
-const BINARY_SRC = path.join(ROOT, "build", "game", "bomberman-online");
-const BINARY_DST = path.join(HERE, "game", "bomberman-online");
-if (fs.existsSync(BINARY_SRC)) {
-  fs.rmSync(BINARY_DST, { recursive: true, force: true });
-  fs.cpSync(BINARY_SRC, BINARY_DST);
-  console.log(`synced bomberman-online binary`);
-} else {
-  console.log("bomberman-online binary not found (will auto-build on first Play)");
+// A release must contain the native game binary plus its adjacent frontend and runtime files.
+// Fail packaging if CI did not produce the game: never publish a launcher-only download.
+const BUILD_GAME_SRC = path.join(ROOT, "build", "game");
+const BUILD_GAME_DST = path.join(HERE, "build", "game");
+const GAME_EXE = path.join(
+  BUILD_GAME_SRC,
+  process.platform === "win32" ? "bomberman-online.exe" : "bomberman-online"
+);
+if (!fs.existsSync(GAME_EXE)) {
+  throw new Error(
+    `Prebuilt game executable is missing: ${GAME_EXE}. Build bomberman_online_boot before packaging.`
+  );
 }
+fs.rmSync(BUILD_GAME_DST, { recursive: true, force: true });
+fs.mkdirSync(path.dirname(BUILD_GAME_DST), { recursive: true });
+fs.cpSync(BUILD_GAME_SRC, BUILD_GAME_DST, { recursive: true });
+console.log(`synced prebuilt game and runtime assets from ${BUILD_GAME_SRC}`);
 
 console.log("launcher build inputs are up to date");

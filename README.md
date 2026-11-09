@@ -4,8 +4,9 @@ A native C/C++ recompilation of **Bomberman Online** (Sega Dreamcast, USA, MK-51
 built on [dreamcomp](https://github.com/phobos665/dream-recomp)-style static SH-4 recompilation,
 with working original online multiplayer via DCNet and a cross-platform Electron launcher.
 
-The original game is © SEGA / HUDSON SOFT. **This repository contains no game data.** You must
-supply your own disc image (`.chd`).
+The original game is © SEGA / HUDSON SOFT. **This public repository and its releases contain no
+copyrighted game data.** Release downloads include a prebuilt native executable; players still
+supply their own Bomberman Online disc image (`.chd`) for the game's runtime disc reads.
 
 ## What is here
 
@@ -56,11 +57,23 @@ The launcher handles disc selection, Play/Headless/Build/Stop, resolution preset
 aspect (native/wide), vSync/fullscreen/FPS/sound, online enable/DCNet server/port, TCP reachability
 test, controller test, remap editor, streaming logs, and settings persistence.
 
-**First run:** choose your disc image and press **Play**. If the game has never been built here, the
-launcher extracts the boot binary from your disc (`dc.py setup`), builds the game with visible
-progress, then launches it. Later Play presses start the existing binary immediately; **Build**
-forces a rebuild after a source change. Nothing from the disc is copied into the app bundle — the
-extracted boot binary and the executable stay in the writable app data directory.
+**Release downloads are prebuilt:** choose your own disc image once and press **Play**. The
+bundled native executable starts directly; the launcher does not run CMake, Ninja, Python, a
+compiler, or a local recompilation. The disc image is passed to the game for GD-ROM reads. The
+**Build** action is only for developer/source checkouts; packaged releases do not rebuild. User
+settings and VMU saves remain in the writable app-data workspace across application updates.
+
+## Prebuilt release pipeline
+
+Every release job checks out the boot executable from the private
+`nvd123-YT/bombermanprivate` repository, verifies its SHA-1 against
+`game/bomberman_online.toml`, and compiles the native game separately for macOS, Windows, and
+Linux. The compiled executable and its adjacent runtime/frontend assets are bundled into the
+download. The private assets are never uploaded to public artifacts or releases.
+
+The workflow requires a fine-grained GitHub token stored as the
+`BOMBERMAN_PRIVATE_TOKEN` Actions secret in this repository. Grant it **Contents: Read-only**
+access to `nvd123-YT/bombermanprivate` only. Do not put the token in source files.
 
 ## Online (DCNet)
 
@@ -89,7 +102,7 @@ online in the launcher and enter online mode in-game.
 | Online connection | TCP established to DCNet access point; DHCP Offer received |
 | Launcher | Electron: disc browse, Play, online, resolution, controller remap, logs, settings |
 | Packaging | electron-builder: macOS .dmg/.zip, Windows .exe/.zip, Linux .AppImage/.deb/.tar.gz |
-| CI | GitHub Actions: nightly builds on macOS/Windows/Linux + tag-triggered releases |
+| CI | GitHub Actions: native prebuilt game + launcher packages on macOS/Windows/Linux |
 | Menu rendering | suspected stretch; true widescreen TBD |
 
 ## Repository rules

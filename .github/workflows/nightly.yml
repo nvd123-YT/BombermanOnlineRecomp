@@ -1,17 +1,20 @@
-name: Nightly Release
+name: Nightly Prebuilt Release
 
 on:
   schedule:
-    - cron: "0 0 * * *"  # every night at 00:00 UTC
-  workflow_dispatch:     # allow manual trigger
+    - cron: "0 0 * * *"
+  workflow_dispatch:
 
 concurrency:
   group: nightly-release
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   validate:
-    name: Validate no game data
+    name: Validate public repository
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -19,24 +22,15 @@ jobs:
 
       - name: Verify no game data committed
         run: |
-          echo "Checking for game data extensions (excluding vendored dreamcomp engine test fixtures)..."
-          if git ls-files | grep -v '^dreamcomp/' | grep -E '\.(chd|cue|gdi|cdi|iso|bin|PVR|AFS|DAT|vmu|vms|vmi|gzf|gpr|rep)$'; then
-            echo "ERROR: Game data files found in repository!"
+          echo "Checking for copyrighted game data outside the vendored engine..."
+          if git ls-files | grep -v '^dreamcomp/' | grep -E '\\.(chd|cue|gdi|cdi|iso|bin|PVR|AFS|DAT|vmu|vms|vmi|gzf|gpr|rep)$'; then
+            echo "::error::Game data files found in the public repository."
             exit 1
           fi
-          echo "OK: No game data committed."
+          echo "OK: no game data committed."
 
-      - name: Verify no credentials
-        run: |
-          echo "Checking for potential credential files..."
-          if git ls-files | xargs grep -l -i "api_key\|secret\|password\|token" 2>/dev/null | grep -v node_modules; then
-            echo "WARNING: Potential credential files found - review before publishing"
-          else
-            echo "OK: No obvious credential files."
-          fi
-
-  test-and-package:
-    name: Test and package Electron launcher
+  build-and-package:
+    name: Build and package prebuilt game
     needs: validate
     runs-on: ${{ matrix.os }}
     strategy:
@@ -44,13 +38,115 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
     steps:
-      - name: Checkout repository
+      - name: Checkout public source
         uses: actions/checkout@v4
+
+      - name: Require private asset token
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.BOMBERMAN_PRIVATE_TOKEN }}
+        run: |
+          if [ -z "$PRIVATE_TOKEN" ]; then
+            echo "::error::Add the BOMBERMAN_PRIVATE_TOKEN Actions secret (fine-grained token with Contents: Read-only access to nvd123-YT/bombermanprivate)."
+            exit 1
+          fi
+
+      - name: Checkout private game assets
+        uses: actions/checkout@v4
+        with:
+          repository: nvd123-YT/bombermanprivate
+          ref: main
+          token: ${{ secrets.BOMBERMAN_PRIVATE_TOKEN }}
+          path: private-assets
+          persist-credentials: false
+
+      - name: Verify and stage boot executable
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          source = Path("private-assets/1ST_READ.BIN")
+          if not source.is_file():
+              raise SystemExit("Private assets repository is missing 1ST_READ.BIN")
+          digest = hashlib.sha1(source.read_bytes()).hexdigest()
+          expected = "26fb8164ab585714bf384eadcfe97734d212240d"
+          if digest != expected:
+              raise SystemExit(f"Wrong Bomberman Online boot revision: {digest}; expected {expected}")
+          target = Path("game/extracted/fs/1ST_READ.BIN")
+          target.parent.mkdir(parents=True, exist_ok=True)
+          target.write_bytes(source.read_bytes())
+          print(f"Verified private boot executable ({source.stat().st_size} bytes, SHA-1 {digest})")
+          PY
+
+      - name: Install Vulkan SDK
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: 1.4.309.0
+          cache: true
+
+      - name: Install native build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config \
+            libasound2-dev libpulse-dev libjack-dev libsndio-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+            libxi-dev libxinerama-dev libxss-dev libxtst-dev libxkbcommon-dev \
+            libwayland-dev libdecor-0-dev libdrm-dev libgbm-dev libudev-dev \
+            libdbus-1-dev libibus-1.0-dev libpipewire-0.3-dev
+
+      - name: Ensure Ninja is available
+        if: runner.os == 'macOS'
+        run: |
+          if ! command -v ninja >/dev/null 2>&1; then brew install ninja; fi
+
+      - name: Build static SDL3
+        shell: bash
+        run: |
+          git clone --depth 1 --branch release-3.2.28 https://github.com/libsdl-org/SDL.git "$RUNNER_TEMP/SDL"
+          cmake -S "$RUNNER_TEMP/SDL" -B "$RUNNER_TEMP/SDL-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdl3" \
+            -DSDL_SHARED=OFF -DSDL_STATIC=ON \
+            -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF \
+            -DSDL_DISABLE_INSTALL=OFF
+          cmake --build "$RUNNER_TEMP/SDL-build" --config Release --parallel 2
+          cmake --install "$RUNNER_TEMP/SDL-build" --config Release
+          echo "CMAKE_PREFIX_PATH=$RUNNER_TEMP/sdl3" >> "$GITHUB_ENV"
+
+      - name: Configure native game with Vulkan renderer
+        shell: bash
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDREAMCOMP_DIR=dreamcomp \
+            -DDREAM_RENDERER=ON \
+            -DDREAMCOMP_FRONTEND=ON \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/sdl3" 2>&1 | tee configure.log
+          if ! grep -q "Vulkan backend enabled" configure.log; then
+            echo "::error::Vulkan renderer was not configured; refusing to package a headless build."
+            exit 1
+          fi
+
+      - name: Compile the actual Bomberman Online game
+        shell: bash
+        run: |
+          cmake --build build --target bomberman_online_boot --parallel 2
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            GAME_EXE="build/game/bomberman-online.exe"
+          else
+            GAME_EXE="build/game/bomberman-online"
+          fi
+          test -s "$GAME_EXE" || { echo "::error::Native game executable was not produced."; exit 1; }
+          test -d build/game/frontend || { echo "::error::Game frontend assets were not produced."; exit 1; }
+          echo "Prebuilt executable ready: $GAME_EXE"
+          ls -lah build/game
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: tools/launcher/package-lock.json
 
@@ -58,88 +154,63 @@ jobs:
         working-directory: tools/launcher
         run: npm ci
 
-      - name: Setup Python venv in vendored dreamcomp
-        shell: bash
-        run: |
-          python3 -m venv dreamcomp/.venv || python -m venv dreamcomp/.venv
-          if [ -f dreamcomp/.venv/bin/pip ]; then
-            dreamcomp/.venv/bin/pip install -U pip 2>/dev/null || true
-          elif [ -f dreamcomp/.venv/Scripts/pip.exe ]; then
-            dreamcomp/.venv/Scripts/pip.exe install -U pip 2>/dev/null || true
-          fi
-
-      - name: Test game builds through dc.py (launcher build path)
-        shell: bash
-        run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDREAMCOMP_DIR=dreamcomp
-          cmake --build build --parallel
-
-      - name: Run launcher selftest
+      - name: Run launcher UI selftest
         working-directory: tools/launcher
         env:
           CI: "true"
           ELECTRON_DISABLE_GPU: "1"
         shell: bash
         run: |
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            sudo apt-get update -y && sudo apt-get install -y xvfb libxkbcommon-x11-0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libasound2t64
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get install -y xvfb libxkbcommon-x11-0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libasound2t64
             xvfb-run -a npm run selftest -- --disable-gpu --no-sandbox
           else
             npm run selftest -- --disable-gpu --no-sandbox
           fi
 
-      - name: Package Electron launcher
+      - name: Package prebuilt game for this platform
         working-directory: tools/launcher
         run: npm run package
 
-      - name: Upload launcher artifact
+      - name: Upload prebuilt game package
         uses: actions/upload-artifact@v4
         with:
-          name: bomberman-online-launcher-${{ matrix.os }}
+          name: bomberman-online-prebuilt-${{ matrix.os }}
           path: tools/launcher/dist/*
+          if-no-files-found: error
           retention-days: 7
 
   release:
-    name: Create nightly release
-    needs: [validate, test-and-package]
+    name: Publish nightly prebuilt release
+    needs: [validate, build-and-package]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download launcher artifacts
+      - name: Download prebuilt packages
         uses: actions/download-artifact@v4
         with:
           path: release-assets/
           merge-multiple: true
 
-      - name: Create nightly tag and push
+      - name: Create nightly tag
         id: tag
+        shell: bash
         run: |
           TAG="nightly-$(date +%Y%m%d)-${{ github.run_id }}"
-          git config user.name "${{ github.actor }}"
-          git config user.email "${{ github.actor }}@users.noreply.github.com"
-          git tag "$TAG"
-          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
-          git push origin "$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Create release
+      - name: Publish nightly release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: Nightly ${{ steps.tag.outputs.tag }}
           body: |
-            ## Nightly Build
+            ## Nightly Prebuilt Build
 
-            Automated nightly release from `main`.
+            Automated native game and launcher packages built from `main`.
 
-            **WARNING:** This repository contains no game data. You must supply your own Bomberman Online (USA) disc image (.chd).
+            **A Bomberman Online disc image (.chd) is still required at runtime** for the game's GD-ROM reads. The downloaded app already contains the compiled native executable; no local compilation is required.
           files: |
             release-assets/*.dmg
             release-assets/*.exe

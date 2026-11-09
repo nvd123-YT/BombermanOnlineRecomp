@@ -117,6 +117,8 @@ function bundleStamp() {
     "src/bomberman_online.cpp",
     "dreamcomp/tools/dc.py",
     "dreamcomp/engine/render/CMakeLists.txt",
+    "build/game/bomberman-online",
+    "build/game/bomberman-online.exe",
   ]) {
     try {
       h.update(fs.readFileSync(path.join(BUNDLED_ROOT, rel)));
@@ -150,6 +152,15 @@ function prepareWorkspace() {
   for (const name of ["CMakeLists.txt", "bomberman_online.toml", "symbols.tsv", "bindings.txt"]) {
     const from = path.join(BUNDLED_ROOT, "game", name);
     if (fs.existsSync(from)) fs.copyFileSync(from, path.join(gameDir, name));
+  }
+  // Ship the prebuilt native game and its adjacent frontend/runtime files into the writable
+  // workspace. Only build/game is replaced; settings and VMU saves remain untouched.
+  const bundledGameBuild = path.join(BUNDLED_ROOT, "build", "game");
+  if (fs.existsSync(bundledGameBuild)) {
+    const workspaceGameBuild = path.join(ROOT, "build", "game");
+    fs.rmSync(workspaceGameBuild, { recursive: true, force: true });
+    fs.mkdirSync(path.dirname(workspaceGameBuild), { recursive: true });
+    fs.cpSync(bundledGameBuild, workspaceGameBuild, { recursive: true });
   }
   fs.mkdirSync(path.dirname(WORKSPACE_STAMP), { recursive: true });
   fs.writeFileSync(WORKSPACE_STAMP, JSON.stringify({ stamp, version: app.getVersion() }, null, 2));
@@ -604,6 +615,9 @@ function writeSettings(patch) {
 // IPC
 // ---------------------------------------------------------------------------
 function rendererEnabled() {
+  // A packaged release contains a CI-built binary that was verified with the Vulkan renderer.
+  // Its CMake cache is intentionally not shipped, so the binary itself is the release marker.
+  if (app.isPackaged && fs.existsSync(EXE)) return true;
   // The cache option alone is not enough: the Vulkan backend is skipped when SDL3, Vulkan or
   // glslc are missing, and the resulting game has no window. The built static library is the
   // real evidence, and it also covers a binary built before the current cache existed.
@@ -704,7 +718,7 @@ ipcMain.handle("game:play", (_e, settings) => {
       return;
     }
     emit("toast", { kind: "info", text: "Launching the game…" });
-    startProcess("game", EXE, ["--config", CONFIG, "--window", ...presetArgs(s)], onlineEnv(s));
+    startProcess("game", EXE, ["--config", CONFIG, "--disc", s.disc, "--window", ...presetArgs(s)], onlineEnv(s));
   };
 
   // First Play on a distributed app: the disc has never been extracted here, so the build would
@@ -741,6 +755,9 @@ ipcMain.handle("game:headless", (_e, settings) => {
 
 ipcMain.handle("game:build", (_e, settings) => {
   const s = writeSettings(settings || {});
+  if (app.isPackaged && fs.existsSync(EXE)) {
+    return { ok: false, error: "This release already includes the prebuilt game. Select your disc image and press Play; no build is needed." };
+  }
   const steps = [];
   if (!fs.existsSync(EXTRACTED)) {
     if (!s.disc) {
