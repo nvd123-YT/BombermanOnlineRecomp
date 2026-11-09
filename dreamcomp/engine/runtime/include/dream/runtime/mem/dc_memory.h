@@ -269,6 +269,23 @@ private:
             vram_dirty_[q >> 6] |= 1ull << (q & 63);
         vram_any_dirty_ = true;
     }
+
+    // Mark VRAM pages as dirty using raw TCW (Texture Cache Window) offsets.
+    // AFS texture loads go through the 32-bit VRAM view onto the 64-bit view,
+    // and the page-offset marking above can miss pages when the interleaving
+    // causes the raw offset to not align with the page-offset marking.
+    // This function takes a TCW offset (0 = 0x00000000, incrementing by 32-byte
+    // granularity up to kVramSize) and marks the corresponding VRAM page.
+    void mark_vram_raw(std::uint32_t tcw_offset) noexcept {
+        // TCW offset is in units of 32 bytes (0x20); convert to a VRAM page index.
+        constexpr std::uint32_t kPageBytes = 64;  // 1 << kVramPageBits
+        if (tcw_offset >= kVramSize) return;
+        const std::uint32_t page = tcw_offset / kPageBytes;
+        const std::uint32_t page_idx = page >> kVramPageBits;
+        if (page_idx < (kVramSize >> kVramPageBits))
+            vram_dirty_[page_idx >> 6] |= 1ull << (page_idx & 63);
+        vram_any_dirty_ = true;
+    }
     struct Target {
         enum Kind { kNone, kBytes, kMmio } kind = kNone;
         std::uint8_t* bytes = nullptr;  // kBytes: host pointer to the first byte
