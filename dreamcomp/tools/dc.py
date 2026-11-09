@@ -92,10 +92,18 @@ def run(cmd: list[str], cwd: str | None = None, check: bool = True, env: dict | 
 
 def port_info(port: str) -> dict:
     port = os.path.abspath(port)
-    tomls = glob.glob(os.path.join(port, "game", "*.toml"))
-    tomls = [t for t in tomls if not t.endswith("suggested.toml")]
-    if len(tomls) != 1:
-        sys.exit(f"{port}: expected exactly one game/<id>.toml, found {len(tomls)}")
+    # Walk up from port looking for the repo root: must have both game/<id>.toml AND CMakeLists.txt
+    for _ in range(20):
+        tomls = glob.glob(os.path.join(port, "game", "*.toml"))
+        tomls = [t for t in tomls if not t.endswith("suggested.toml")]
+        if tomls and os.path.exists(os.path.join(port, "CMakeLists.txt")):
+            break
+        parent = os.path.dirname(port)
+        if parent == port:
+            break
+        port = parent
+    if not tomls or not os.path.exists(os.path.join(port, "CMakeLists.txt")):
+        sys.exit(f"{original}: expected a directory with game/<id>.toml and CMakeLists.txt, found {port}")
     gid = os.path.splitext(os.path.basename(tomls[0]))[0]
     local_path = os.path.join(port, ".dreamcomp", "local.json")
     local = json.load(open(local_path)) if os.path.exists(local_path) else {}
