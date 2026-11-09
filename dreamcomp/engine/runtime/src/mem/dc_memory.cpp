@@ -219,6 +219,15 @@ void DcMemory::store(std::uint32_t a, T v) {
     }
 }
 
+void DcMemory::mark_vram_raw(std::uint32_t tcw_offset) noexcept {
+        // TCW offset is in units of 32 bytes (0x20); convert to a VRAM page index.
+        constexpr std::uint32_t kPageBytes = 64;  // 1 << kVramPageBits
+        if (tcw_offset >= kVramSize) return;
+        const std::uint32_t page = tcw_offset / kPageBytes;
+        const std::uint32_t page_idx = page >> kVramPageBits;
+        if (page_idx < (kVramSize >> kVramPageBits))
+            vram_dirty_[page_idx >> 6] |= 1ull << (page_idx & 63);
+        vram_any_dirty_ = true;
 }
 
 void DcMemory::undo_journal() {
@@ -355,13 +364,6 @@ void DcMemory::sq_flush(std::uint32_t a) {
         // When AFS textures are loaded through the 32-bit VRAM view, the page-offset marking
         // can miss pages due to the 32↔64-bit interleaving. Mark the raw TCW offset too so the
         // cache invalidation sees the full extent of the write.
-        // AFS texture loads go through the 32-bit VRAM view; the page-offset marking
-        // can miss pages due to the 32-to-64-bit interleaving; mark the raw TCW offset
-        // so the cache invalidation sees the full extent of the write.
-        // mark_vram_raw((dest & 0x1FFFFFFFu) & ~31u);
-        // When AFS textures are loaded through the 32-bit VRAM view, the page-offset marking
-        // can miss pages due to the 32-to-64-bit interleaving. Mark the raw TCW offset too so the
-        // cache invalidation sees the full extent of the write.
         mark_vram_raw((dest & 0x1FFFFFFFu) & ~31u);
         // A burst into RAM is eight stores as far as anything watching memory is concerned. Until
         // this was here the hash and the watch saw none of them.
@@ -380,15 +382,4 @@ void DcMemory::sq_flush(std::uint32_t a) {
     }
 }
 
-
-void DcMemory::mark_vram_raw(std::uint32_t tcw_offset) noexcept {
-    // TCW offset is in units of 32 bytes (0x20); convert to a VRAM page index.
-    constexpr std::uint32_t kPageBytes = 64;  // 1 << kVramPageBits
-    if (tcw_offset >= kVramSize) return;
-    const std::uint32_t page = tcw_offset / kPageBytes;
-    const std::uint32_t page_idx = page >> kVramPageBits;
-    if (page_idx < (kVramSize >> kVramPageBits))
-        vram_dirty_[page_idx >> 6] |= 1ull << (page_idx & 63);
-    vram_any_dirty_ = true;
-}
 }  // namespace dream::mem
