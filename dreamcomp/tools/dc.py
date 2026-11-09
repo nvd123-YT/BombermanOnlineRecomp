@@ -217,17 +217,15 @@ def _heartbeat(label: str) -> None:
     """Print a spinning progress indicator every 2 seconds so the user knows
     the build is still alive during long compilations (e.g. large C++ files)."""
     import time as _t
-    _spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    _spinner = ["\u23f0", "\u23f1", "\u23f2", "\u23f3", "\u23f4", "\u23f5", "\u23f6", "\u23f7"]
     _idx = 0
     while _heartbeat_running:
         _idx = (_idx + 1) % len(_spinner)
         elapsed = int(_t.time() - _heartbeat_start)
         mins, secs = divmod(int(_t.time() - _heartbeat_start), 60)
-        print(f"[build] {_spinner[_idx]} {label}: building... {mins}m{secs:02d}s elapsed", end="", flush=True)
+        sys.stdout.write(f"\r[build] {_spinner[_idx]} {label}: building... {mins}m{secs:02d}s elapsed")
+        sys.stdout.flush()
         _t.sleep(2)
-
-_heartbeat_running = False
-_heartbeat_start = 0
 
 def cmd_build(a) -> int:
     global _heartbeat_running, _heartbeat_start
