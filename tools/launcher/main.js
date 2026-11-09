@@ -7,9 +7,14 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const net = require("net");
+const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 
-const ROOT = findRepoRoot();
+// In dev mode the repository itself is the workspace. A packaged app must not build inside its own
+// bundle: Linux AppImages mount read-only, and Program Files / /Applications may not be writable.
+// Use a per-user workspace and seed it from the copy bundled with the app.
+const BUNDLED_ROOT = findRepoRoot();
+const ROOT = app.isPackaged ? path.join(app.getPath("userData"), "workspace") : BUNDLED_ROOT;
 const DC_DIR = process.env.DREAMCOMP_DIR || path.join(ROOT, "dreamcomp");
 const LOCAL_JSON = path.join(ROOT, ".dreamcomp", "local.json");
 const BINDINGS_DEFAULT = path.join(ROOT, "game", "bindings.txt");
@@ -21,6 +26,9 @@ const EXE = path.join(
   ROOT, "build", "game",
   process.platform === "win32" ? "bomberman-online.exe" : "bomberman-online"
 );
+// dc.py setup writes the boot executable here. Without it the translator has nothing to build,
+// so a distributed app that has never seen this machine's disc must extract before building.
+const EXTRACTED = path.join(ROOT, "game", "extracted", "fs", "1ST_READ.BIN");
 const SELFTEST = process.argv.includes("--selftest");
 
 const DEFAULTS = {
@@ -95,6 +103,59 @@ function findRepoRoot() {
   return path.resolve(__dirname, "..", "..");
 }
 
+// Seed the writable workspace from the copy bundled in the app, once per engine/app build. The
+// user's settings, VMU, extracted boot binary and build output live only in the workspace, so
+// re-seeding never discards them.
+const WORKSPACE_STAMP = path.join(ROOT, ".dreamcomp", "workspace.json");
+
+function bundleStamp() {
+  const h = crypto.createHash("sha1");
+  h.update(app.getVersion());
+  for (const rel of [
+    "CMakeLists.txt",
+    "game/bomberman_online.toml",
+    "src/bomberman_online.cpp",
+    "dreamcomp/tools/dc.py",
+    "dreamcomp/engine/render/CMakeLists.txt",
+  ]) {
+    try {
+      h.update(fs.readFileSync(path.join(BUNDLED_ROOT, rel)));
+    } catch {}
+  }
+  return h.digest("hex");
+}
+
+function prepareWorkspace() {
+  if (!app.isPackaged) return;
+  const stamp = bundleStamp();
+  try {
+    if (JSON.parse(fs.readFileSync(WORKSPACE_STAMP, "utf8")).stamp === stamp) return;
+  } catch {}
+  fs.mkdirSync(ROOT, { recursive: true });
+  // Source trees have no user data in them, so replacing them wholesale is safe.
+  for (const name of ["src", "dreamcomp"]) {
+    const from = path.join(BUNDLED_ROOT, name);
+    if (!fs.existsSync(from)) continue;
+    const to = path.join(ROOT, name);
+    fs.rmSync(to, { recursive: true, force: true });
+    fs.cpSync(from, to, { recursive: true });
+  }
+  for (const name of ["CMakeLists.txt", "README.md", "LICENSE"]) {
+    const from = path.join(BUNDLED_ROOT, name);
+    if (fs.existsSync(from)) fs.copyFileSync(from, path.join(ROOT, name));
+  }
+  // game/ also holds extracted/ (the user's boot binary), so copy its files individually.
+  const gameDir = path.join(ROOT, "game");
+  fs.mkdirSync(gameDir, { recursive: true });
+  for (const name of ["CMakeLists.txt", "bomberman_online.toml", "symbols.tsv", "bindings.txt"]) {
+    const from = path.join(BUNDLED_ROOT, "game", name);
+    if (fs.existsSync(from)) fs.copyFileSync(from, path.join(gameDir, name));
+  }
+  fs.mkdirSync(path.dirname(WORKSPACE_STAMP), { recursive: true });
+  fs.writeFileSync(WORKSPACE_STAMP, JSON.stringify({ stamp, version: app.getVersion() }, null, 2));
+  console.log(`workspace seeded at ${ROOT}`);
+}
+
 let child = null;
 
 // ---------------------------------------------------------------------------
@@ -135,30 +196,50 @@ function resolvePython() {
   return win32 ? "python" : "python3";
 }
 
-function dcCommand(args) {
-  const pyCmd = resolvePython();
-  const dcCandidates = [
-    path.join(DC_DIR, "tools", "dc.py"),
-    process.resourcesPath && path.join(process.resourcesPath, "dreamcomp", "tools", "dc.py"),
-    process.resourcesPath && path.join(process.resourcesPath, "app", "dreamcomp", "tools", "dc.py"),
-    path.join(__dirname, "..", "..", "dreamcomp", "tools", "dc.py"),
-  ].filter(Boolean);
-  let dcPy = dcCandidates[0];
-  for (const c of dcCandidates) {
-    if (fs.existsSync(c)) {
-      dcPy = c;
-      break;
-    }
-  }
-  return { command: pyCmd, args: [dcPy, ...args] };
-}function toolEnv(extra = {}) {
+function toolEnv(extra = {}) {
   const env = { ...process.env, DREAMCOMP_DIR: DC_DIR, ...extra };
   const win32 = process.platform === "win32";
   const venvBin = path.join(DC_DIR, ".venv", win32 ? "Scripts" : "bin");
   env.PATH = venvBin + path.delimiter + (env.PATH || "");
+  // Ensure the system CMake on this machine is visible inside the venv sandbox.
+  // The Apple CLT cmake lives at a non-default path; fall back to common prefixes.
+  const cmakeCandidates = [
+    path.join(os.homedir(), ".local", "cmake"),
+    "/usr/local",
+    "/opt/homebrew",
+    "/Library/Developer/CommandLineTools/usr/bin",
+  ].filter((p) => fs.existsSync(p));
+  if (cmakeCandidates.length) {
+    // Add the first existing cmake bin dir to PATH so `cmake` resolves without the user
+    // having to manually source env.sh in a packaged app sandbox.
+    env.PATH = cmakeCandidates[0] + path.delimiter + env.PATH;
+  }
+  // A packaged app inherits no shell configuration. Point CMake at the usual per-user toolchain
+  // prefixes so find_package(SDL3) works without the user exporting CMAKE_PREFIX_PATH.
+  if (!env.CMAKE_PREFIX_PATH) {
+    const prefixes =
+      process.platform === "darwin"
+        ? [path.join(os.homedir(), ".local", "SDL3"), "/opt/homebrew", "/usr/local"]
+        : win32
+          ? []
+          : [path.join(os.homedir(), ".local")];
+    const present = prefixes.filter((p) => fs.existsSync(p));
+    if (present.length) env.CMAKE_PREFIX_PATH = present.join(path.delimiter);
+  }
   if (!env.DCDISC_LIBCHDR) {
-    const dylib = path.join(DC_DIR, "build-libchdr", "libchdr.dylib");
-    if (fs.existsSync(dylib)) env.DCDISC_LIBCHDR = dylib;
+    // CHD discs need libchdr; dcdisc also falls back to chdman or a system libchdr. Point it at a
+    // local build when there is one, using the platform's shared-library suffix.
+    const name =
+      process.platform === "win32" ? "chdr.dll"
+      : process.platform === "darwin" ? "libchdr.dylib"
+      : "libchdr.so";
+    for (const dir of [path.join(DC_DIR, "build-libchdr"), path.join(ROOT, "build-libchdr")]) {
+      const dylib = path.join(dir, name);
+      if (fs.existsSync(dylib)) {
+        env.DCDISC_LIBCHDR = dylib;
+        break;
+      }
+    }
   }
   return env;
 }
@@ -270,9 +351,35 @@ function startProcess(label, command, baseArgs, envPatch = {}, onExit = null) {
 
 // dc.py resolves the port's executable by globbing build/game/*, which picks up Makefile on
 // macOS/Linux. Builds still go through it; Play launches the known binary directly.
-function startChild(label, args, envPatch = {}) {
+function startChild(label, args, envPatch = {}, onExit = null) {
   const { command, args: baseArgs } = dcCommand(args);
-  return startProcess(label, command, baseArgs, envPatch);
+  return startProcess(label, command, baseArgs, envPatch, onExit);
+}
+
+// Run dc.py steps one after another (setup -> build), stopping at the first failure. Each step is
+// its own child process so its output streams into the log like any other command.
+function runDcSteps(steps, done) {
+  const step = (i) => {
+    if (i >= steps.length) {
+      if (done) done();
+      return;
+    }
+    const [label, args, note] = steps[i];
+    if (note) emit("toast", { kind: "info", text: note });
+    const res = startChild(label, args, {}, (code, signal) => {
+      if (code !== 0) {
+        emit("toast", { kind: "error", text: `${label} failed – check the log.` });
+        emit("log", {
+          stream: "err",
+          text: `${label} exited (${signal || code}); stopping before launch.`,
+        });
+        return;
+      }
+      step(i + 1);
+    });
+    if (!res.ok) return;
+  };
+  step(0);
 }
 
 function stopChild() {
@@ -497,6 +604,13 @@ function writeSettings(patch) {
 // IPC
 // ---------------------------------------------------------------------------
 function rendererEnabled() {
+  // The cache option alone is not enough: the Vulkan backend is skipped when SDL3, Vulkan or
+  // glslc are missing, and the resulting game has no window. The built static library is the
+  // real evidence, and it also covers a binary built before the current cache existed.
+  const dir = path.join(ROOT, "build", "dreamcomp", "engine", "render");
+  if (!["libdream_render_vk.a", "dream_render_vk.lib"].some((n) => fs.existsSync(path.join(dir, n)))) {
+    return false;
+  }
   try {
     const text = fs.readFileSync(CACHE, "utf8");
     const re = new RegExp("\r?\n");
@@ -567,26 +681,53 @@ ipcMain.handle("bindings:write", (_e, text) => writeBindings(String(text)));
 
 ipcMain.handle("game:play", (_e, settings) => {
   const s = writeSettings(settings || {});
-  if (!fs.existsSync(EXE)) {
-    // Auto-build when Play is pressed and the binary is missing.
-    emit("toast", { kind: "info", text: "Game binary missing – building first…" });
-    return startProcess("build", ["build", "."], {}, (code, signal) => {
-      if (code === 0 && fs.existsSync(EXE)) {
-        emit("toast", { kind: "info", text: "Build complete – launching game…" });
-        startProcess("game", EXE, ["--config", CONFIG, "--window", ...presetArgs(s)], onlineEnv(s));
-      } else {
-        emit("toast", { kind: "error", text: "Build failed – check logs." });
-        emit("log", { stream: "err", text: `Build exited (${signal || code}), game not launched.` });
-      }
-    });
-  }
-  if (!rendererEnabled()) {
-    return { ok: false, error: "This build was configured headless (DREAM_RENDERER=OFF). Rebuild with Build." };
-  }
   if (!s.disc) return { ok: false, error: "Choose a disc image first." };
   if (!fs.existsSync(s.disc)) return { ok: false, error: `Disc not found: ${s.disc}` };
-  return startProcess("game", EXE, ["--config", CONFIG, "--window", ...presetArgs(s)],
-    onlineEnv(s));
+  if (!rendererEnabled() && fs.existsSync(EXE)) {
+    return {
+      ok: false,
+      error:
+        "This build has no window renderer. Install SDL3 and Vulkan (the Vulkan SDK provides glslc), then press Build.",
+    };
+  }
+
+  const launch = () => {
+    if (!fs.existsSync(EXE)) {
+      emit("toast", { kind: "error", text: "Build finished but the game binary is missing – check the log." });
+      return;
+    }
+    if (!rendererEnabled()) {
+      emit("toast", {
+        kind: "error",
+        text: "Built without a window renderer – install SDL3 and Vulkan (glslc), then press Build.",
+      });
+      return;
+    }
+    emit("toast", { kind: "info", text: "Launching the game…" });
+    startProcess("game", EXE, ["--config", CONFIG, "--window", ...presetArgs(s)], onlineEnv(s));
+  };
+
+  // First Play on a distributed app: the disc has never been extracted here, so the build would
+  // be a no-op (dream_add_game returns early without the boot binary). Extract first, then build.
+  const steps = [];
+  if (!fs.existsSync(EXE)) {
+    if (!fs.existsSync(EXTRACTED)) {
+      steps.push(["setup", ["setup", ".", "--disc", s.disc],
+        "First run: extracting the boot binary from your disc…"]);
+    }
+    steps.push(["build", ["build", "."], "Building the game – this takes a few minutes…"]);
+  }
+  if (steps.length) {
+    runDcSteps(steps, () => {
+      // After build completes, persist that the game is built and has a renderer so the Play
+      // button stays clickable on subsequent launches without re-launching the app.
+      writeSettings({ built: true, renderer: true, disc: s.disc });
+      launch();
+    });
+    return { ok: true };
+  }
+  launch();
+  return { ok: true };
 });
 
 ipcMain.handle("game:headless", (_e, settings) => {
@@ -598,7 +739,21 @@ ipcMain.handle("game:headless", (_e, settings) => {
   return startChild("headless report", args);
 });
 
-ipcMain.handle("game:build", () => startChild("build", ["build", "."]));
+ipcMain.handle("game:build", (_e, settings) => {
+  const s = writeSettings(settings || {});
+  const steps = [];
+  if (!fs.existsSync(EXTRACTED)) {
+    if (!s.disc) {
+      return { ok: false, error: "Choose a disc image first – the boot binary has not been extracted yet." };
+    }
+    if (!fs.existsSync(s.disc)) return { ok: false, error: `Disc not found: ${s.disc}` };
+    steps.push(["setup", ["setup", ".", "--disc", s.disc],
+      "Extracting the boot binary from your disc…"]);
+  }
+  steps.push(["build", ["build", "."], "Building the game – this takes a few minutes…"]);
+  runDcSteps(steps);
+  return { ok: true };
+});
 ipcMain.handle("game:stop", () => stopChild());
 ipcMain.handle("net:test", (_e, host, port) => testConnection(host, port));
 ipcMain.handle("app:quit", () => {
@@ -616,6 +771,7 @@ ipcMain.handle("win:close", () => win && win.close());
 // Lifecycle
 // ---------------------------------------------------------------------------
 app.whenReady().then(() => {
+  prepareWorkspace();
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

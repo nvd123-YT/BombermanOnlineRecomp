@@ -220,7 +220,7 @@ async function play() {
     toast(res.error || "Could not start the game.", "err");
     return;
   }
-  setStatus("Launching the game…", "warn");
+  // Progress comes from the task events: setup -> build -> game, each with its own status.
 }
 
 async function headless() {
@@ -229,7 +229,7 @@ async function headless() {
 }
 
 async function build() {
-  const res = await window.api.build();
+  const res = await window.api.build(S);
   if (!res.ok) toast(res.error || "Could not start the build.", "err");
 }
 

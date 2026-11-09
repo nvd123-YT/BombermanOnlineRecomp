@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld("api", {
   detectDisc: () => ipcRenderer.invoke("disc:detect"),
   play: (settings) => ipcRenderer.invoke("game:play", settings),
   headless: (settings) => ipcRenderer.invoke("game:headless", settings),
-  build: () => ipcRenderer.invoke("game:build"),
+  build: (settings) => ipcRenderer.invoke("game:build", settings),
   stop: () => ipcRenderer.invoke("game:stop"),
   testNet: (host, port) => ipcRenderer.invoke("net:test", host, port),
   quit: () => ipcRenderer.invoke("app:quit"),

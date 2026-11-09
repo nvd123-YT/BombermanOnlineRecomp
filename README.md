@@ -24,12 +24,17 @@ supply your own disc image (`.chd`).
 
 Prerequisites: CMake 3.24+, Ninja, a C++20 compiler, Python 3, and an extracted boot file from your
 own disc. The dreamcomp engine is vendored at `./dreamcomp`; nothing else needs checking out.
+A windowed build also needs SDL3 and Vulkan (the Vulkan SDK provides `glslc`); on macOS, MoltenVK
+and a `glslc` on `PATH` (or the repository's libshaderc-driven shim) are enough.
 
 ```sh
 tools/dc.sh setup . --disc "/path/to/Bomberman Online (USA).chd"
 tools/dc.sh build .            # headless-capable build
 tools/dc.sh report . --frames 600
 ```
+
+`setup` reads the boot binary straight from your image. `.gdi` and `.cue` need nothing extra; for
+`.chd`, the vendored libchdr is built once on first use so no system package is required.
 
 The game executable is generated into `build/game/bomberman-online` and is never committed. The
 generated SH-4 code is compiled as eight translation units in parallel; the build prints a
@@ -50,6 +55,12 @@ npm run package                # electron-builder: .dmg/.zip (macOS), .exe/.zip 
 The launcher handles disc selection, Play/Headless/Build/Stop, resolution presets + scale slider,
 aspect (native/wide), vSync/fullscreen/FPS/sound, online enable/DCNet server/port, TCP reachability
 test, controller test, remap editor, streaming logs, and settings persistence.
+
+**First run:** choose your disc image and press **Play**. If the game has never been built here, the
+launcher extracts the boot binary from your disc (`dc.py setup`), builds the game with visible
+progress, then launches it. Later Play presses start the existing binary immediately; **Build**
+forces a rebuild after a source change. Nothing from the disc is copied into the app bundle — the
+extracted boot binary and the executable stay in the writable app data directory.
 
 ## Online (DCNet)
 

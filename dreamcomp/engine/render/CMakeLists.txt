@@ -36,30 +36,60 @@ if(NOT DREAM_RENDERER)
   return()
 endif()
 
-# Vulkan configuration (dreamcomp — local MoltenVK installation)
-set(Vulkan_FOUND TRUE)
-set(Vulkan_INCLUDE_DIRS "/Users/nicolas.delponte/.local/MoltenVK/MoltenVK/MoltenVK/include")
-set(Vulkan_LIBRARIES "/Users/nicolas.delponte/.local/MoltenVK/MoltenVK/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib")
-set(Vulkan_LIBRARY "/Users/nicolas.delponte/.local/MoltenVK/MoltenVK/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib")
-
-# Create imported Vulkan target
-add_library(Vulkan::Vulkan IMPORTED SHARED)
-set_target_properties(Vulkan::Vulkan PROPERTIES
-    IMPORTED_LOCATION "${Vulkan_LIBRARY}"
-    INTERFACE_INCLUDE_DIRECTORIES "${Vulkan_INCLUDE_DIRS}"
-)
-
-find_package(SDL3 QUIET CONFIG)
-if(NOT Vulkan_FOUND OR NOT SDL3_FOUND)
-  message(STATUS "dream::render: Vulkan ${Vulkan_FOUND} SDL3 ${SDL3_FOUND}; the Vulkan backend is skipped")
-  return()
+# Vulkan. A normal SDK (Windows, Linux, macOS via LunarG) is found by find_package. On macOS the
+# common setup is MoltenVK, which ships the headers and a dylib but no CMake config, so accept a
+# MoltenVK tree from MOLTENVK_DIR, a local install or Homebrew before giving up.
+find_package(Vulkan QUIET)
+if(NOT Vulkan_FOUND)
+  if(DEFINED ENV{VULKAN_SDK})
+    set(Vulkan_INCLUDE_DIRS "$ENV{VULKAN_SDK}/include")
+    if(WIN32)
+      set(Vulkan_LIBRARY "$ENV{VULKAN_SDK}/Lib/vulkan-1.lib")
+    elseif(APPLE)
+      set(Vulkan_LIBRARY "$ENV{VULKAN_SDK}/lib/libvulkan.dylib")
+    else()
+      set(Vulkan_LIBRARY "$ENV{VULKAN_SDK}/lib/libvulkan.so")
+    endif()
+  elseif(APPLE)
+    foreach(_mvk
+        "$ENV{MOLTENVK_DIR}"
+        "$ENV{HOME}/.local/MoltenVK/MoltenVK/MoltenVK"
+        "/opt/homebrew/opt/molten-vulkan"
+        "/usr/local/opt/molten-vulkan")
+      if(NOT Vulkan_INCLUDE_DIRS AND EXISTS "${_mvk}/include/vulkan/vulkan.h")
+        set(Vulkan_INCLUDE_DIRS "${_mvk}/include")
+        set(Vulkan_LIBRARY "${_mvk}/dynamic/dylib/macOS/libMoltenVK.dylib")
+      endif()
+    endforeach()
+  endif()
+  if(Vulkan_INCLUDE_DIRS AND Vulkan_LIBRARY AND EXISTS "${Vulkan_LIBRARY}")
+    set(Vulkan_FOUND TRUE)
+  endif()
 endif()
 
+if(Vulkan_FOUND AND NOT TARGET Vulkan::Vulkan)
+  add_library(Vulkan::Vulkan UNKNOWN IMPORTED)
+  set_target_properties(Vulkan::Vulkan PROPERTIES
+      IMPORTED_LOCATION "${Vulkan_LIBRARY}"
+      INTERFACE_INCLUDE_DIRECTORIES "${Vulkan_INCLUDE_DIRS}")
+endif()
+
+find_package(SDL3 QUIET CONFIG)
+
 # Shaders are compiled to SPIR-V at build time and embedded, so a release build carries no shader
-# source and needs no compiler at run time. glslc ships with the Vulkan SDK.
-set(DREAM_GLSLC "/Users/nicolas.delponte/.local/bmo-tools/glslc-bmo")
-if(NOT DREAM_GLSLC)
-  message(STATUS "dream::render: no glslc; the Vulkan backend is skipped")
+# source and needs no compiler at run time. glslc ships with the Vulkan SDK; macOS has no SDK
+# here, so fall back to the repository's small libshaderc-driven shim.
+find_program(DREAM_GLSLC NAMES glslc glslc-bmo
+  HINTS "$ENV{VULKAN_SDK}/bin" "$ENV{VULKAN_SDK}/Bin" "$ENV{HOME}/.local/bmo-tools")
+if(NOT DREAM_GLSLC AND APPLE)
+  set(_shim "${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/glslc")
+  if(EXISTS "${_shim}")
+    set(DREAM_GLSLC "${_shim}")
+  endif()
+endif()
+
+if(NOT Vulkan_FOUND OR NOT SDL3_FOUND OR NOT DREAM_GLSLC)
+  message(STATUS "dream::render: Vulkan ${Vulkan_FOUND} SDL3 ${SDL3_FOUND} glslc ${DREAM_GLSLC}; the Vulkan backend is skipped")
   return()
 endif()
 
@@ -95,8 +125,8 @@ add_library(dream_render_vk STATIC
   src/vk/dxgi_present.cpp
 )
 add_dependencies(dream_render_vk dream_render_shaders)
-target_include_directories(dream_render_vk PUBLIC include /Users/nicolas.delponte/Documents/GitHub/BombermanOnlineRecomp/build/dreamcomp/engine/render/shaders /Users/nicolas.delponte/.local/MoltenVK/MoltenVK/MoltenVK/include)
-target_link_libraries(dream_render_vk PUBLIC dream::render "${Vulkan_LIBRARY}" SDL3::SDL3)
+target_include_directories(dream_render_vk PUBLIC include ${_spv_dir} ${Vulkan_INCLUDE_DIRS})
+target_link_libraries(dream_render_vk PUBLIC dream::render Vulkan::Vulkan SDL3::SDL3)
 if(WIN32)
   target_link_libraries(dream_render_vk PRIVATE d3d11 dxgi)
 endif()

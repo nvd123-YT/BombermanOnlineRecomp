@@ -182,9 +182,63 @@ def cmd_deps(_a) -> int:
     return 0
 
 
+def _libchdr_names() -> list[str]:
+    if IS_WIN:
+        return ["chdr.dll", "libchdr.dll", "chdr-static.dll"]
+    if sys.platform == "darwin":
+        return ["libchdr.dylib", "libchdr.0.dylib"]
+    return ["libchdr.so", "libchdr.so.0"]
+
+
+def ensure_libchdr(disc: str) -> None:
+    """Make .chd images readable without asking the user to install anything.
+
+    dcdisc delegates hunk decompression to libchdr (or MAME's chdman). libchdr is vendored, so
+    build its shared library once into <dreamcomp>/build-libchdr and point dcdisc at it. This runs
+    on every platform: the output is chdr.dll on Windows, libchdr.dylib on macOS, libchdr.so on
+    Linux. .gdi/.cue images need none of this, and an explicit DCDISC_LIBCHDR always wins.
+    """
+    if not disc.lower().endswith(".chd") or os.environ.get("DCDISC_LIBCHDR"):
+        return
+    bdir = os.path.join(ROOT, "build-libchdr")
+    for name in _libchdr_names():
+        found = glob.glob(os.path.join(bdir, "**", name), recursive=True)
+        if found:
+            os.environ["DCDISC_LIBCHDR"] = found[0]
+            return
+    src = os.path.join(ROOT, "engine", "third_party", "libchdr")
+    if not os.path.isdir(src):
+        return
+    print("libchdr has not been built here yet; building it once so .chd images can be read...",
+          flush=True)
+    cfg = ["cmake", "-S", src, "-B", bdir, "-DCMAKE_BUILD_TYPE=Release",
+           "-DCHDR_WANT_TESTS=OFF", "-DBUILD_SHARED_LIBS=ON"]
+    if IS_WIN:
+        cfg += ["-DCMAKE_C_COMPILER=clang-cl"]
+    try:
+        if run(cfg, check=False) != 0:
+            print("warning: could not configure libchdr; .chd extraction may fail", flush=True)
+            return
+        if run(["cmake", "--build", bdir, "--config", "Release", "--parallel", "4"],
+               check=False) != 0:
+            print("warning: could not build libchdr; .chd extraction may fail", flush=True)
+            return
+    except OSError as exc:
+        print(f"warning: cmake is not available ({exc}); .chd extraction may fail. "
+              "Use a .gdi/.cue image, install chdman, or install CMake.", flush=True)
+        return
+    for name in _libchdr_names():
+        found = glob.glob(os.path.join(bdir, "**", name), recursive=True)
+        if found:
+            os.environ["DCDISC_LIBCHDR"] = found[0]
+            print(f"libchdr -> {found[0]}")
+            return
+
+
 def cmd_setup(a) -> int:
     info = port_info(a.port)
     disc = os.path.abspath(a.disc)
+    ensure_libchdr(disc)
     from_toml = open(info["toml"], encoding="utf-8").read()
     want = None
     for line in from_toml.splitlines():
@@ -343,6 +397,13 @@ def _keep_awake():
         return None
 
 
+# In dc.py cmd_build, the generator defaults to Ninja. When running from a packaged app's sandbox the
+# Xcode Command Line Tools cmake may not be on PATH, so fall back to Unix Makefiles in that case.
+# This matches the repo's documented build and the CMakeCache that parks at 97% with Make.
+def _ninja_available() -> bool:
+    import shutil
+    return shutil.which("ninja") is not None
+
 def cmd_build(a) -> int:
     info = port_info(a.port)
     bdir = os.path.join(info["dir"], "build")
@@ -351,7 +412,8 @@ def cmd_build(a) -> int:
         if a.fresh and os.path.isdir(bdir):
             shutil.rmtree(bdir)
         if not os.path.exists(os.path.join(bdir, "CMakeCache.txt")):
-            cfg = ["cmake", "-S", info["dir"], "-B", bdir, "-G", "Ninja",
+            gen = "Ninja" if _ninja_available() else "Unix Makefiles"
+            cfg = ["cmake", "-S", info["dir"], "-B", bdir, "-G", gen,
                    "-DCMAKE_BUILD_TYPE=Release", f"-DDREAMCOMP_DIR={ROOT}"]
             if IS_WIN:
                 cfg += ["-DCMAKE_C_COMPILER=clang-cl", "-DCMAKE_CXX_COMPILER=clang-cl"]
