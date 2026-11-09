@@ -246,7 +246,10 @@ jobs:
     name: Publish prebuilt GitHub release
     needs: [validate, build-and-package]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Main-branch builds also publish a pre-release so successful platform
+    # packages are attached to a downloadable GitHub Release, not left only
+    # as short-lived Actions artifacts. Version tags publish normal releases.
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
@@ -266,6 +269,11 @@ jobs:
             release-assets/*.deb
             release-assets/*.tar.gz
             release-assets/*.zip
+          # Main pushes get a uniquely tagged pre-release; v* tags retain
+          # their normal versioned release behavior.
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('prebuilt-{0}', github.run_id) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('Prebuilt build {0}', github.run_number) }}
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
           draft: false
           generate_release_notes: true
         env:
