@@ -53,7 +53,7 @@ command/observation is recorded here.
 |---|---|
 | Windowed macOS build | RESOLVED — local MoltenVK at `~/.local/MoltenVK/...`, glslc shim at `~/.local/bmo-tools/glslc-bmo` |
 | REA SH-4 import | Ghidra headless is primary; REA cannot open SH-4 raw binaries (verified) |
-| Generated unit size: one 179 MB C++ unit | Compiles with `-O0` via `BMO_FAST_BUILD=ON`; 8 GB memory sufficient |
+| Generated code size: 179 MB C++ | Emitted as 8 translation units; compiles in parallel; 8 GB memory sufficient |
 | Ghidra `.gpr` project corrupted | `BombermanOnline.gpr` was 0 bytes; recreated but Ghidra reports "marker file not found"; needs fresh project creation in Ghidra GUI |
 | Menu rendering (renderer-level) | Insertion-order fix applied but flickering persists; needs per-pixel translucent sort or depth bias in dreamcomp renderer |
 
@@ -65,7 +65,7 @@ command/observation is recorded here.
 |---|---|
 | Windowed macOS build | RESOLVED — local MoltenVK at `~/.local/MoltenVK/...`, glslc shim at `~/.local/bmo-tools/glslc-bmo` |
 | REA SH-4 import | Ghidra headless is primary; REA cannot open SH-4 raw binaries (verified) |
-| Generated unit size: one 179 MB C++ unit | Compiles with `-O0` via `BMO_FAST_BUILD=ON`; 8 GB memory sufficient |
+| Generated code size: 179 MB C++ | Emitted as 8 translation units; compiles in parallel; 8 GB memory sufficient |
 | Ghidra `.gpr` project corrupted | `BombermanOnline.gpr` was 0 bytes; recreated but Ghidra reports "marker file not found"; needs fresh project creation in Ghidra GUI |
 | Menu rendering (renderer-level) | VRAM dirty tracking fix: SH-4 writes VRAM through 64-bit view (0x06000000-0x07FFFFFF) which goes through `vram_map32()` address remapping in `resolve()`. `mark_vram()` marked the remapped address as dirty, but `info.address` from `tcw_address()` stores raw TCW addresses. Texture cache invalidation checked raw TCW addresses against dirty ranges → mismatch → stale texture data. Fix: added `mark_vram_raw(offset, size)` that marks raw VRAM offsets, called from `store()` and `sq_flush()` alongside `mark_vram()`. Also: sprite plane solver init corner 0 z/u/v when degenerate; vertex buffer ring increased 4→16. |
 | PVR/AFS asset decoding | Documented but not decoded; needs PVR pixel format determination and AFS entry classification |

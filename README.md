@@ -22,8 +22,8 @@ supply your own disc image (`.chd`).
 
 ## Build
 
-Prerequisites: the dreamcomp checkout at `~/Tools/dreamcomp` (or `$DREAMCOMP_DIR`), its Python
-venv, and an extracted boot file from your own disc.
+Prerequisites: CMake 3.24+, Ninja, a C++20 compiler, Python 3, and an extracted boot file from your
+own disc. The dreamcomp engine is vendored at `./dreamcomp`; nothing else needs checking out.
 
 ```sh
 tools/dc.sh setup . --disc "/path/to/Bomberman Online (USA).chd"
@@ -31,7 +31,9 @@ tools/dc.sh build .            # headless-capable build
 tools/dc.sh report . --frames 600
 ```
 
-The game executable is generated into `build/game/bomberman-online` and is never committed.
+The game executable is generated into `build/game/bomberman-online` and is never committed. The
+generated SH-4 code is compiled as eight translation units in parallel; the build prints a
+heartbeat with the number of parts finished so a long first build does not look hung.
 
 ## Launcher
 

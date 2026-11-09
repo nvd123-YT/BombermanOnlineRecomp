@@ -24,9 +24,9 @@ tools/dc.sh build . --headless     # -DDREAM_RENDERER=OFF; runtime + translator 
 tools/dc.sh build .                # attempts the Vulkan/SDL3 window; skipped here for now
 ```
 
-The generated unit is ~179 MB of C++ and compiles with `-O1` (forced by `DreamAddGame.cmake` for
-generated units). On this machine clang peaks around 0.3–0.8 GB RSS for that unit; the build is
-single-unit-bound.
+The generated code is ~179 MB of C++, emitted as eight translation units (`bomberman_online_part0..7`)
+that compile in parallel with `-O1` (forced by `DreamAddGame.cmake` for generated units). Each part
+is ~22 MB, so one part is a few minutes rather than one 20-minute single-unit compile.
 
 ## Analysis setup
 

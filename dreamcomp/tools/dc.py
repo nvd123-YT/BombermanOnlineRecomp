@@ -221,52 +221,163 @@ def cmd_setup(a) -> int:
     return 0
 
 
-def _heartbeat(label: str) -> None:
-    """Print a spinning progress indicator every 2 seconds so the user knows
-    the build is still alive during long compilations (e.g. large C++ files)."""
+_heartbeat_stop = threading.Event()
+
+
+def _heartbeat(label: str, bdir: str | None = None) -> None:
+    """Print a full line every 15 seconds while the build runs.
+
+    The old version overwrote one line with `\\r`. The launcher reads stdout line by line, so
+    nothing appeared there and the UI sat on the last real line (97%) for the whole compile.
+    """
+    import glob as _g
     import time as _t
-    _spinner = ["\u23f0", "\u23f1", "\u23f2", "\u23f3", "\u23f4", "\u23f5", "\u23f6", "\u23f7"]
-    _idx = 0
-    while _heartbeat_running:
-        _idx = (_idx + 1) % len(_spinner)
-        elapsed = int(_t.time() - _heartbeat_start)
-        mins, secs = divmod(int(_t.time() - _heartbeat_start), 60)
-        sys.stdout.write(f"\r[build] {_spinner[_idx]} {label}: building... {mins}m{secs:02d}s elapsed")
-        sys.stdout.flush()
-        _t.sleep(2)
+    start = _t.time()
+    while not _heartbeat_stop.wait(15):
+        mins, secs = divmod(int(_t.time() - start), 60)
+        parts = ""
+        if bdir:
+            # CMake's own counter parks near 97% while the generated units compile: it counts
+            # targets, and they are the last eight steps. Object files appear as each part
+            # finishes, which is the progress the user actually wants.
+            total = len(_g.glob(os.path.join(bdir, "game", "gen", "*_part*.cpp")))
+            done = len(_g.glob(os.path.join(bdir, "game", "CMakeFiles", "*", "gen", "*_part*.o")))
+            if total:
+                parts = f", {done}/{total} generated parts compiled"
+        print(f"[build] {label}: still working ({mins}m{secs:02d}s elapsed){parts}", flush=True)
+
+
+class _BuildLock:
+    """One build per repository.
+
+    Two `dc.py build` invocations (a Play click while a terminal build runs, or two launcher
+    windows) each start a translation and a compiler over the same multi-hundred-megabyte units.
+    They fight over the same output files and the machine swaps; the build looks frozen at 97%
+    with two clang processes at 4% CPU. Wait for the holder instead of starting a second one.
+    """
+
+    def __init__(self, path: str):
+        self.path = path
+        self.fh = None
+
+    def __enter__(self):
+        import time as _t
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        self.fh = open(self.path, "a+")
+        announced = False
+        while True:
+            try:
+                if IS_WIN:
+                    import msvcrt
+                    self.fh.seek(0)
+                    if os.path.getsize(self.path) == 0:
+                        self.fh.write("0")
+                        self.fh.flush()
+                    self.fh.seek(0)
+                    msvcrt.locking(self.fh.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.fh.seek(0)
+                self.fh.truncate()
+                self.fh.write(str(os.getpid()))
+                self.fh.flush()
+                return self
+            except OSError:
+                if not announced:
+                    print("[build] another build is already running here; waiting for it...",
+                          flush=True)
+                    announced = True
+                _t.sleep(3)
+
+    def __exit__(self, *_exc):
+        if self.fh is not None:
+            self.fh.close()  # closing releases the advisory lock
+            self.fh = None
+
+
+def _total_ram_gb():
+    try:
+        if sys.platform == "darwin":
+            return int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]).strip()) / 1024**3
+        if not IS_WIN:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemTotal:"):
+                        return int(line.split()[1]) / 1024**2
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def _build_jobs() -> str:
+    """Cap parallel compiles.
+
+    Each generated part peaks well over a gigabyte inside clang. Four at once on an 8 GB machine
+    makes the kernel kill compilers (`Killed: 9`) and the build fails halfway; the earlier single
+    unit hid this by being unable to run in parallel at all. Budget ~3 GB per job.
+    """
+    override = os.environ.get("DREAM_BUILD_JOBS")
+    if override:
+        return override
+    jobs = min(os.cpu_count() or 4, 4)
+    ram = _total_ram_gb()
+    if ram:
+        jobs = min(jobs, max(1, int(ram // 3)))
+    return str(max(1, jobs))
+
+
+def _keep_awake():
+    """Hold off idle sleep on macOS while a build runs.
+
+    A sleeping machine pauses every compiler process. The build then reports hours of elapsed
+    time with minutes of CPU used, which is exactly what a hung build looks like. `caffeinate -w`
+    releases the assertion when this process exits.
+    """
+    if sys.platform != "darwin" or os.environ.get("DREAM_NO_CAFFEINE"):
+        return None
+    try:
+        return subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return None
+
 
 def cmd_build(a) -> int:
-    global _heartbeat_running, _heartbeat_start
     info = port_info(a.port)
     bdir = os.path.join(info["dir"], "build")
-    if a.fresh and os.path.isdir(bdir):
-        shutil.rmtree(bdir)
-    if not os.path.exists(os.path.join(bdir, "CMakeCache.txt")):
-        cfg = ["cmake", "-S", info["dir"], "-B", bdir, "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
-               f"-DDREAMCOMP_DIR={ROOT}"]
-        if IS_WIN:
-            cfg += ["-DCMAKE_C_COMPILER=clang-cl", "-DCMAKE_CXX_COMPILER=clang-cl"]
-        if a.headless:
-            cfg += ["-DDREAM_RENDERER=OFF"]
-        run(cfg)
+    lock_path = os.path.join(info["dir"], ".dreamcomp", "build.lock")
+    with _BuildLock(lock_path):
+        if a.fresh and os.path.isdir(bdir):
+            shutil.rmtree(bdir)
+        if not os.path.exists(os.path.join(bdir, "CMakeCache.txt")):
+            cfg = ["cmake", "-S", info["dir"], "-B", bdir, "-G", "Ninja",
+                   "-DCMAKE_BUILD_TYPE=Release", f"-DDREAMCOMP_DIR={ROOT}"]
+            if IS_WIN:
+                cfg += ["-DCMAKE_C_COMPILER=clang-cl", "-DCMAKE_CXX_COMPILER=clang-cl"]
+            if a.headless:
+                cfg += ["-DDREAM_RENDERER=OFF"]
+            run(cfg)
 
-    target = a.target or f"{info['id']}_boot"
+        target = a.target or f"{info['id']}_boot"
+        jobs = _build_jobs()
 
-    # Start heartbeat thread so user sees progress during long builds
-    _heartbeat_running = True
-    _heartbeat_start = __import__("time").time()
-    hb = threading.Thread(target=_heartbeat, args=(f"building {target}",), daemon=True)
-    hb.start()
-    try:
-        rc = run(["cmake", "--build", bdir, "--target", target, "--parallel"])
-        if rc != 0:
-            # Target-specific build failed (e.g. headless platforms lack renderer targets);
-            # fall back to building everything.
-            rc = run(["cmake", "--build", bdir, "--parallel"])
-        return rc
-    finally:
-        _heartbeat_running = False
-        hb.join(timeout=2)
+        _heartbeat_stop.clear()
+        hb = threading.Thread(target=_heartbeat, args=(f"building {target}", bdir), daemon=True)
+        hb.start()
+        awake = _keep_awake()
+        try:
+            rc = run(["cmake", "--build", bdir, "--target", target, "--parallel", jobs])
+            if rc != 0:
+                # Target-specific build failed (e.g. headless platforms lack renderer targets);
+                # fall back to building everything.
+                rc = run(["cmake", "--build", bdir, "--parallel", jobs])
+            return rc
+        finally:
+            _heartbeat_stop.set()
+            hb.join(timeout=2)
+            if awake is not None:
+                awake.terminate()
 
 
 def launcher_args(info: dict, extra: list[str]) -> list[str]:

@@ -12,7 +12,8 @@
   "scripts": {
     "start": "electron .",
     "selftest": "electron . --selftest",
-    "package": "electron-builder"
+    "sync": "node sync.js",
+    "package": "node sync.js && electron-builder"
   },
   "devDependencies": {
     "electron": "^38.0.0",
@@ -49,7 +50,11 @@
       "node_modules/**",
       "package.json",
       "dreamcomp/**",
-      "game/**"
+      "game/**",
+      "src/**",
+      "CMakeLists.txt",
+      "README.md",
+      "LICENSE"
     ],
     "directories": {
       "output": "dist"

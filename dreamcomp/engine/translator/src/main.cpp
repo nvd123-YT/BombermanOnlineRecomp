@@ -24,6 +24,10 @@
 
 namespace {
 
+// Split parts for a game's main unit. Must match the part list DreamAddGame.cmake puts in the
+// target: the translator writes <id>_part0.cpp ... <id>_part7.cpp.
+constexpr int kMainUnitParts = 8;
+
 int usage(int code) {
     std::fprintf(stderr,
                  "dream-translate %s\n"
@@ -55,6 +59,22 @@ bool load_image(const std::string& path, std::uint32_t base, dream::translator::
     img.bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
     img.base = base;
     return true;
+}
+
+// Rewrite a generated file only when its bytes actually changed. Retranslating produces identical
+// text most of the time (only the translator binary or the config touched it), and bumping the
+// mtime there makes the build recompile hundreds of megabytes of C++ for nothing.
+void write_if_changed(const std::filesystem::path& path, const std::string& text) {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(path, ec);
+    if (!ec && size == text.size()) {
+        std::ifstream in(path, std::ios::binary);
+        std::string old((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (old == text)
+            return;
+    }
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << text;
 }
 
 int cmd_disasm(int argc, char** argv) {
@@ -215,14 +235,9 @@ int cmd_emit(int argc, char** argv) {
                      dream::translator::apply_symbols(syms, fns), fns.size(), symbols.c_str());
     }
     const auto res = dream::translator::emit_unit(img, fns, opt);
-    {
-        std::ofstream o(out);
-        o << res.source;
-    }
-    if (!header.empty()) {
-        std::ofstream h(header);
-        h << res.header;
-    }
+    write_if_changed(out, res.source);
+    if (!header.empty())
+        write_if_changed(header, res.header);
     for (const auto& w : res.warnings) std::fprintf(stderr, "note: %s\n", w.c_str());
     report_coverage_gaps(res);
     std::fprintf(
@@ -457,12 +472,13 @@ int translate_view(const dream::translator::GameConfig& cfg, const dream::transl
     }
     const auto res = dream::translator::emit_unit(img, fns, opt);
     const auto base = out_dir / stem;
-    {
-        std::ofstream o(base.string() + ".cpp");
-        o << res.source;
-        std::ofstream h(base.string() + ".h");
-        h << res.header;
+    if (res.parts.empty()) {
+        write_if_changed(base.string() + ".cpp", res.source);
+    } else {
+        for (std::size_t i = 0; i < res.parts.size(); ++i)
+            write_if_changed(base.string() + "_part" + std::to_string(i) + ".cpp", res.parts[i]);
     }
+    write_if_changed(base.string() + ".h", res.header);
     write_functions_json(base.string() + ".functions.json", fns, r);
     {
         std::ofstream rep(base.string() + ".report.txt");
@@ -532,6 +548,7 @@ int cmd_game(int argc, char** argv) {
     std::filesystem::create_directories(out_dir);
     std::vector<std::uint32_t> seeds{to_link_space(cfg, cfg.entry)};
     for (std::uint32_t a : cfg.extra_functions) seeds.push_back(to_link_space(cfg, a));
+    opt.unit_parts = kMainUnitParts;
     int rc = translate_view(cfg, img, seeds, cfg.id, out_dir, opt, cfg.symbols ? &syms : nullptr);
     // Relocated copies: the same bytes viewed at the address they execute from. A destination
     // that appears more than once (overlays) numbers its later units _2, _3, ...; the game's
@@ -559,6 +576,7 @@ int cmd_game(int argc, char** argv) {
         if (seeds_r.empty())
             seeds_r.push_back(view.base);
         dream::translator::EmitOptions view_opt = opt;
+        view_opt.unit_parts = 1;  // relocated copies are small; one unit each
         if (rel.no_fold)
             view_opt.fold_literals = false;
         view_opt.overlay = rel.overlay;

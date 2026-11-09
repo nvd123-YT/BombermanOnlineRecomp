@@ -49,4 +49,11 @@ __pycache__/
 
 # Electron launcher dependencies and AI assistant history
 tools/launcher/node_modules/
+# Build inputs copied in by tools/launcher/sync.js before packaging (single source: repo root)
+tools/launcher/dreamcomp/
+tools/launcher/game/
+tools/launcher/src/
+tools/launcher/CMakeLists.txt
+tools/launcher/README.md
+tools/launcher/LICENSE
 .aider.*

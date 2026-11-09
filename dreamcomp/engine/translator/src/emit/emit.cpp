@@ -1709,8 +1709,9 @@ EmitResult emit_unit(const Image& image, const std::vector<FunctionSpec>& functi
     for (const auto& f : specs) {
         hdr << "void " << f.name << "(dream::sh4::Ctx& c, dream::Memory& m);\n";
         src << "void " << f.name << "(Ctx& c, Memory& m);\n";
-        src << "static void " << f.name
-            << "__resume(Ctx& c, Memory& m, std::uint32_t resume_pc);\n";
+        // fn__resume is static and only used by this function's wrapper and table entry, which
+        // are emitted in the same part as its definition. Declaring it here would leave a
+        // declared-but-undefined static function in every other part (-Wunused-function).
         // [hooks]: defined by the port; a missing definition is a link error, never a silent no-op.
         if (!f.hook.empty() && f.hook_entry)
             src << "bool dream_hook_entry_" << f.hook << "(Ctx& c, Memory& m);\n";
@@ -1718,6 +1719,9 @@ EmitResult emit_unit(const Image& image, const std::vector<FunctionSpec>& functi
             src << "void dream_hook_exit_" << f.hook << "(Ctx& c, Memory& m);\n";
     }
     src << "\n";
+    // Everything above is the unit's fixed preamble: includes, namespace, and the declarations
+    // every part needs to call any emitted function. Keep a copy so each split part can carry it.
+    const std::string preamble = src.str();
     // Pass 0: pool words the unit itself writes (run-time patched literals) are never folded.
     std::set<std::uint32_t> written;
     {
@@ -1848,11 +1852,20 @@ EmitResult emit_unit(const Image& image, const std::vector<FunctionSpec>& functi
                     (f.fpscr_entry & ~(1u << 20)) | (static_cast<std::uint32_t>(e.sz) << 20);
         }
     }
-    for (const auto& f : specs) {
+    // Function bodies and their table entries are emitted per function so the unit can be split
+    // afterwards. A function and its registrar entry must stay together: the entry names the
+    // static __resume symbol, which only exists in the part that defines the body.
+    std::vector<std::string> fn_body(specs.size());
+    std::vector<std::string> fn_sig(specs.size());
+    std::vector<std::string> fn_entry(specs.size());
+    for (std::size_t i = 0; i < specs.size(); ++i) {
+        const auto& f = specs[i];
         const std::size_t before = result.fp_runtime_branches;
         FunctionEmitter fe(image, f, options, known, summaries, result);
         fe.set_written(&written);
         const std::string body = fe.run();
+        std::ostringstream out;
+        out << "static void " << f.name << "__resume(Ctx& c, Memory& m, std::uint32_t resume_pc);\n";
         // Entry-mode clone: only where the entry mode was unknown and that cost runtime tests.
         if (options.fp_entry_clones && result.fp_runtime_branches > before &&
             (f.entry_pr_unknown || f.entry_sz_unknown)) {
@@ -1862,41 +1875,68 @@ EmitResult emit_unit(const Image& image, const std::vector<FunctionSpec>& functi
             FunctionEmitter fc(image, fast, options, known, summaries, scratch);
             fc.set_written(&written);
             fc.set_clone_suffix("__fpd");
-            src << "static void " << f.name << "__fpd(Ctx& c, Memory& m, std::uint32_t resume_pc);\n";
-            src << fc.run() << "\n";
+            out << "static void " << f.name << "__fpd(Ctx& c, Memory& m, std::uint32_t resume_pc);\n";
+            out << fc.run() << "\n";
             ++result.fp_entry_clones;
             result.fp_clone_branches += scratch.fp_runtime_branches;
             fe.set_fast_clone(f.fpscr_entry & 0x00180000u);
         }
-        src << body << fe.wrapper() << "\n";
-    }
-    src << "namespace {\n";
-    if (options.overlay) {
-        // Up to 32 instruction words from the function's own extent (never its literal pool,
-        // which a no_fold copy patches at run time): the runtime dispatches to this translation
-        // only while RAM still holds them.
-        const std::uint32_t image_end = image.base + static_cast<std::uint32_t>(image.bytes.size());
-        for (const auto& f : specs) {
-            src << "const std::uint16_t kSig_" << f.name << "[] = {";
+        out << body << fe.wrapper() << "\n";
+        fn_body[i] = out.str();
+
+        std::ostringstream sig;
+        if (options.overlay) {
+            // Up to 32 instruction words from the function's own extent (never its literal pool,
+            // which a no_fold copy patches at run time): the runtime dispatches to this
+            // translation only while RAM still holds them.
+            const std::uint32_t image_end =
+                image.base + static_cast<std::uint32_t>(image.bytes.size());
             const std::uint32_t stop = std::min({f.end, f.entry + 64u, image_end});
-            for (std::uint32_t a = f.entry; a < stop; a += 2) src << hexu(image.read16(a)) << ", ";
-            src << "};\n";
+            sig << "const std::uint16_t kSig_" << f.name << "[] = {";
+            for (std::uint32_t a = f.entry; a < stop; a += 2)
+                sig << hexu(image.read16(a)) << ", ";
+            sig << "};\n";
         }
-    }
-    src << "const FunctionEntry kTable[] = {\n";
-    for (const auto& f : specs) {
-        src << "    {" << hexu(f.entry) << ", &" << f.name;
+        fn_sig[i] = sig.str();
+
+        std::ostringstream entry;
+        entry << "    {" << hexu(f.entry) << ", &" << f.name;
         if (options.overlay)
-            src << ", kSig_" << f.name << ", sizeof kSig_" << f.name << " / sizeof(std::uint16_t)";
+            entry << ", kSig_" << f.name << ", sizeof kSig_" << f.name
+                  << " / sizeof(std::uint16_t)";
         else
-            src << ", nullptr, 0";
-        src << ", " << hexu(f.end) << ", &" << f.name << "__resume},\n";
+            entry << ", nullptr, 0";
+        entry << ", " << hexu(f.end) << ", &" << f.name << "__resume},\n";
+        fn_entry[i] = entry.str();
     }
-    src << "};\nstruct Registrar {\n    Registrar() { register_functions(kTable, sizeof kTable / "
-           "sizeof kTable[0]); }\n} registrar;\n"
-        << "}  // namespace\n}  // namespace dream::gen\n";
+    // Assemble one part: preamble, then the bodies and registrar entries assigned to it. Parts are
+    // dealt round-robin so one huge function does not land in the same part as all the others.
+    auto assemble = [&](std::size_t first, std::size_t step) {
+        std::ostringstream out;
+        out << preamble;
+        for (std::size_t i = first; i < specs.size(); i += step)
+            out << fn_body[i];
+        out << "namespace {\n";
+        for (std::size_t i = first; i < specs.size(); i += step)
+            out << fn_sig[i];
+        out << "const FunctionEntry kTable[] = {\n";
+        for (std::size_t i = first; i < specs.size(); i += step)
+            out << fn_entry[i];
+        out << "};\nstruct Registrar {\n    Registrar() { register_functions(kTable, sizeof kTable / "
+               "sizeof kTable[0]); }\n} registrar;\n"
+            << "}  // namespace\n}  // namespace dream::gen\n";
+        return out.str();
+    };
+    const int parts = std::max(1, options.unit_parts);
+    if (parts == 1) {
+        result.source = assemble(0, 1);
+    } else {
+        result.parts.reserve(static_cast<std::size_t>(parts));
+        for (int p = 0; p < parts; ++p)
+            result.parts.push_back(assemble(static_cast<std::size_t>(p),
+                                            static_cast<std::size_t>(parts)));
+    }
     hdr << "}  // namespace dream::gen\n";
-    result.source = src.str();
     result.header = hdr.str();
     return result;
 }

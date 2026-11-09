@@ -59,6 +59,11 @@ struct EmitOptions {
     // for the default mode, chosen by its wrapper when the guest arrives in that mode (dreamcomp;
     // docs/emitter-design.md "Entry-mode clones"). Off: every such function keeps its runtime tests.
     bool fp_entry_clones = true;
+    // Split the emitted unit into this many translation units. A game image emits millions of
+    // lines in one unit, and one clang invocation over that is minutes of serial work with a
+    // multi-gigabyte peak: splitting lets the build compile the parts in parallel and rebuild
+    // only the part whose functions changed. 1 keeps the historical single-file output.
+    int unit_parts = 1;
 };
 
 // A run of bytes inside a function that discovery never decoded. Often a literal pool, sometimes
@@ -68,7 +73,10 @@ struct CoverageGap {
 };
 
 struct EmitResult {
-    std::string source;                 // one translation unit
+    std::string source;                 // one translation unit (empty when split)
+    // When EmitOptions::unit_parts > 1: one complete translation unit per part, each with the
+    // declarations and its own function table. Concatenating them is not the single-unit output.
+    std::vector<std::string> parts;
     std::string header;                 // declarations of the emitted functions
     std::vector<std::string> warnings;  // per-instruction notes (unlowered ops etc.)
     std::size_t instructions = 0;
