@@ -219,15 +219,6 @@ void DcMemory::store(std::uint32_t a, T v) {
     }
 }
 
-void DcMemory::mark_vram_raw(std::uint32_t tcw_offset) noexcept {
-        // TCW offset is in units of 32 bytes (0x20); convert to a VRAM page index.
-        constexpr std::uint32_t kPageBytes = 64;  // 1 << kVramPageBits
-        if (tcw_offset >= kVramSize) return;
-        const std::uint32_t page = tcw_offset / kPageBytes;
-        const std::uint32_t page_idx = page >> kVramPageBits;
-        if (page_idx < (kVramSize >> kVramPageBits))
-            vram_dirty_[page_idx >> 6] |= 1ull << (page_idx & 63);
-        vram_any_dirty_ = true;
 }
 
 void DcMemory::undo_journal() {
