@@ -19,7 +19,7 @@ function(dream_target_defaults tgt)
     target_compile_definitions(${tgt} PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
   else()
     target_compile_options(${tgt} PRIVATE
-      -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion
+      -Wall -Wextra -Wpedantic -Wshadow -Wno-conversion -Wno-sign-conversion
       -ffp-contract=off -frounding-math
       $<$<BOOL:${DREAM_WERROR}>:-Werror>)
   endif()
