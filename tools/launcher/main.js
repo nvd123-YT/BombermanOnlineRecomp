@@ -9,7 +9,6 @@ const os = require("os");
 const net = require("net");
 const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
-const { autoUpdater } = require("electron-updater");
 
 // In dev mode the repository itself is the workspace. A packaged app must not build inside its own
 // bundle: Linux AppImages mount read-only, and Program Files / /Applications may not be writable.
@@ -171,6 +170,15 @@ function prepareWorkspace() {
 let child = null;
 
 const RELEASES_URL = "https://github.com/nvd123-YT/BombermanOnlineRecomp/releases";
+const RELEASES_API = "https://api.github.com/repos/nvd123-YT/BombermanOnlineRecomp/releases?per_page=30";
+const UPDATE_CHECKSUM_ASSET = "SHA256SUMS.txt";
+const BUILD_INFO_PATH = path.join(__dirname, "build-info.json");
+let BUILD_INFO = { tag: "development", commit: "" };
+try {
+  const candidate = JSON.parse(fs.readFileSync(BUILD_INFO_PATH, "utf8"));
+  if (candidate && typeof candidate === "object") BUILD_INFO = { ...BUILD_INFO, ...candidate };
+} catch {}
+
 let updaterState = {
   state: "idle",
   message: "Check for updates",
@@ -183,82 +191,244 @@ function setUpdaterState(state, fields = {}) {
   emit("update-status", updaterState);
 }
 
-function configureUpdater() {
-  if (!app.isPackaged) {
-    setUpdaterState("development", { message: "Updates are available in packaged releases." });
-    return;
-  }
-
-  // The distributed macOS builds are unsigned. Squirrel.Mac requires a signed application
-  // for automatic installation, so keep macOS updates as an explicit release-page download.
-  if (process.platform === "darwin") {
-    setUpdaterState("manual", { message: "Download the latest macOS build from Releases." });
-    return;
-  }
-
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = false;
-  autoUpdater.allowPrerelease = true;
-  autoUpdater.on("checking-for-update", () => {
-    setUpdaterState("checking", { message: "Checking for updates…" });
-  });
-  autoUpdater.on("update-available", (info) => {
-    setUpdaterState("available", {
-      message: `Version ${info.version} is available.`,
-      availableVersion: info.version,
+function httpsBuffer(url, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirects > 6) return reject(new Error("Too many redirects while contacting GitHub."));
+    const target = new URL(url);
+    const req = require("https").get(target, {
+      headers: {
+        "User-Agent": "BombermanOnlineLauncher-Updater/1.0",
+        "Accept": "application/vnd.github+json",
+        "Cache-Control": "no-cache",
+      },
+    }, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        res.resume();
+        httpsBuffer(new URL(res.headers.location, target).toString(), redirects + 1).then(resolve, reject);
+        return;
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        reject(new Error(`GitHub request failed with HTTP ${res.statusCode || "unknown"}.`));
+        return;
+      }
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => resolve(Buffer.concat(chunks)));
+      res.on("error", reject);
     });
-  });
-  autoUpdater.on("update-not-available", (info) => {
-    setUpdaterState("current", {
-      message: "You have the latest version.",
-      availableVersion: info && info.version,
-    });
-  });
-  autoUpdater.on("download-progress", (progress) => {
-    setUpdaterState("downloading", {
-      message: `Downloading update: ${Math.round(progress.percent)}%`,
-      percent: Math.round(progress.percent),
-      availableVersion: updaterState.availableVersion,
-    });
-  });
-  autoUpdater.on("update-downloaded", (info) => {
-    setUpdaterState("downloaded", {
-      message: `Version ${info.version} is ready to install.`,
-      availableVersion: info.version,
-    });
-  });
-  autoUpdater.on("error", (error) => {
-    setUpdaterState("error", {
-      message: error && error.message ? error.message : String(error),
-    });
+    req.setTimeout(30000, () => req.destroy(new Error("GitHub request timed out.")));
+    req.on("error", reject);
   });
 }
 
+function downloadUpdateAsset(url, destination, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirects > 6) return reject(new Error("Too many redirects while downloading the update."));
+    const target = new URL(url);
+    const req = require("https").get(target, {
+      headers: { "User-Agent": "BombermanOnlineLauncher-Updater/1.0" },
+    }, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        res.resume();
+        downloadUpdateAsset(new URL(res.headers.location, target).toString(), destination, redirects + 1)
+          .then(resolve, reject);
+        return;
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        reject(new Error(`Update download failed with HTTP ${res.statusCode || "unknown"}.`));
+        return;
+      }
+      const output = fs.createWriteStream(destination, { flags: "wx" });
+      res.pipe(output);
+      output.on("finish", () => output.close(() => resolve(destination)));
+      output.on("error", (error) => {
+        fs.rmSync(destination, { force: true });
+        reject(error);
+      });
+      res.on("error", (error) => {
+        output.destroy();
+        fs.rmSync(destination, { force: true });
+        reject(error);
+      });
+    });
+    req.setTimeout(120000, () => req.destroy(new Error("Update download timed out.")));
+    req.on("error", reject);
+  });
+}
+
+function sha256File(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash("sha256");
+    const stream = fs.createReadStream(filePath);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => resolve(hash.digest("hex")));
+  });
+}
+
+function updateAssetSuffix() {
+  if (process.platform === "darwin") {
+    const arch = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x64" : "";
+    if (!arch) throw new Error(`Unsupported macOS architecture: ${process.arch}`);
+    return `-mac-${arch}.zip`;
+  }
+  if (process.platform === "win32") return "-win-x64.exe";
+  if (process.platform === "linux" && process.env.APPIMAGE) return "-linux-x64.AppImage";
+  return "";
+}
+
+async function findLatestRelease() {
+  const suffix = updateAssetSuffix();
+  if (!suffix) return null;
+  const response = JSON.parse((await httpsBuffer(RELEASES_API)).toString("utf8"));
+  if (!Array.isArray(response)) throw new Error("GitHub returned an invalid release list.");
+  const eligible = response
+    .filter((release) => !release.draft && Array.isArray(release.assets))
+    .filter((release) => release.assets.some((asset) => asset.name === UPDATE_CHECKSUM_ASSET))
+    .filter((release) => release.assets.some((asset) => asset.name.endsWith(suffix)))
+    .sort((a, b) => String(b.published_at || b.created_at).localeCompare(
+      String(a.published_at || a.created_at)
+    ));
+  return eligible[0] || null;
+}
+
+function checksumForAsset(text, filename) {
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.trim().match(/^([a-f0-9]{64})\s+\*?(.+)$/i);
+    if (match && match[2].trim() === filename) return match[1].toLowerCase();
+  }
+  throw new Error(`Release checksum list is missing ${filename}.`);
+}
+
+function findMacAppBundle() {
+  let dir = path.resolve(process.resourcesPath || __dirname);
+  for (let i = 0; i < 10; i++) {
+    if (dir.toLowerCase().endsWith(".app") && fs.existsSync(path.join(dir, "Contents", "Info.plist"))) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error("Could not locate the installed Bomberman Online Launcher.app bundle.");
+}
+
 async function performUpdateAction() {
-  if (process.platform === "darwin" || !app.isPackaged) {
+  if (updaterBusy) return { ok: false, error: "An update action is already running." };
+  if (!app.isPackaged) {
     await shell.openExternal(RELEASES_URL);
+    setUpdaterState("development", { message: "Install a packaged release to use in-app updates." });
     return { ok: true, manual: true };
   }
-  if (updaterBusy) return { ok: false, error: "An update action is already running." };
+  if (child) return { ok: false, error: "Close Bomberman Online before updating the launcher." };
+
+  const suffix = updateAssetSuffix();
+  if (!suffix) {
+    await shell.openExternal(RELEASES_URL);
+    setUpdaterState("manual", { message: "Download the Linux .deb or .tar.gz manually; AppImage installs can update here." });
+    return { ok: true, manual: true };
+  }
 
   try {
     updaterBusy = true;
-    if (updaterState.state === "downloaded") {
-      if (child) return { ok: false, error: "Close the game before installing the launcher update." };
-      autoUpdater.quitAndInstall();
-      return { ok: true, installing: true };
-    }
-    if (updaterState.state === "available") {
-      setUpdaterState("downloading", {
-        message: "Downloading update…",
-        availableVersion: updaterState.availableVersion,
-        percent: 0,
+    if (updaterState.state !== "available" || !updaterState.release) {
+      setUpdaterState("checking", { message: "Checking GitHub Releases…" });
+      const release = await findLatestRelease();
+      if (!release) throw new Error("No compatible release with a SHA-256 manifest was found.");
+      if (release.tag_name === BUILD_INFO.tag) {
+        setUpdaterState("current", { message: "You have the latest build.", releaseTag: release.tag_name });
+        return { ok: true, current: true };
+      }
+      const asset = release.assets.find((item) => item.name.endsWith(suffix));
+      const manifestAsset = release.assets.find((item) => item.name === UPDATE_CHECKSUM_ASSET);
+      setUpdaterState("available", {
+        message: `Build ${release.name || release.tag_name} is available.`,
+        availableVersion: release.name || release.tag_name,
+        releaseTag: release.tag_name,
+        release,
       });
-      await autoUpdater.downloadUpdate();
-      return { ok: true, downloading: true };
+      return { ok: true, available: true };
     }
-    await autoUpdater.checkForUpdates();
-    return { ok: true, checking: true };
+
+    const release = updaterState.release;
+    const asset = release.assets.find((item) => item.name.endsWith(suffix));
+    const manifestAsset = release.assets.find((item) => item.name === UPDATE_CHECKSUM_ASSET);
+    if (!asset || !manifestAsset) throw new Error("The selected release is missing its platform package or checksum manifest.");
+
+    setUpdaterState("downloading", {
+      message: "Downloading and verifying the update…",
+      availableVersion: release.name || release.tag_name,
+      releaseTag: release.tag_name,
+    });
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bomberman-online-update-"));
+    const archivePath = path.join(tempDir, path.basename(asset.name));
+    const checksumPath = path.join(tempDir, UPDATE_CHECKSUM_ASSET);
+    try {
+      await downloadUpdateAsset(asset.browser_download_url, archivePath);
+      await downloadUpdateAsset(manifestAsset.browser_download_url, checksumPath);
+      const checksumText = fs.readFileSync(checksumPath, "utf8");
+      const expected = checksumForAsset(checksumText, asset.name);
+      const actual = await sha256File(archivePath);
+      if (actual !== expected) throw new Error("SHA-256 verification failed. The update will not be installed.");
+
+      const choice = await dialog.showMessageBox(win, {
+        type: "info",
+        buttons: ["Install and restart", "Later"],
+        defaultId: 0,
+        cancelId: 1,
+        title: "Bomberman Online Launcher Update",
+        message: `Build ${release.name || release.tag_name} is downloaded and verified.`,
+        detail: "The launcher will close, install the update, and reopen. Your disc selection, settings, bindings, and VMU save are stored separately and will be kept.",
+      });
+      if (choice.response !== 0) {
+        setUpdaterState("available", {
+          message: "Update downloaded and verified. Click to install when ready.",
+          availableVersion: release.name || release.tag_name,
+          releaseTag: release.tag_name,
+          release,
+        });
+        // Retain the verified package directory for the next click.
+        updaterState.downloadedPath = archivePath;
+        updaterState.tempDir = tempDir;
+        return { ok: true, downloaded: true };
+      }
+
+      const pid = String(process.pid);
+      if (process.platform === "darwin") {
+        const appBundle = findMacAppBundle();
+        const helper = path.join(tempDir, "update-macos.sh");
+        fs.copyFileSync(path.join(__dirname, "update-macos.sh"), helper);
+        const proc = spawn("/bin/bash", [helper, appBundle, archivePath, pid, tempDir], {
+          detached: true, stdio: "ignore",
+        });
+        proc.unref();
+      } else if (process.platform === "win32") {
+        const helper = path.join(tempDir, "update-windows.ps1");
+        fs.copyFileSync(path.join(__dirname, "update-windows.ps1"), helper);
+        const proc = spawn("powershell.exe", [
+          "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+          "-File", helper, "-Installer", archivePath,
+          "-ParentPid", pid, "-AppExe", process.execPath, "-TempDir", tempDir,
+        ], { detached: true, stdio: "ignore" });
+        proc.unref();
+      } else {
+        const appImagePath = process.env.APPIMAGE;
+        const helper = path.join(tempDir, "update-linux.sh");
+        fs.copyFileSync(path.join(__dirname, "update-linux.sh"), helper);
+        const proc = spawn("/bin/bash", [helper, appImagePath, archivePath, pid, tempDir], {
+          detached: true, stdio: "ignore",
+        });
+        proc.unref();
+      }
+      setUpdaterState("installing", { message: "Installing update. The launcher will restart shortly." });
+      app.quit();
+      return { ok: true, installing: true };
+    } catch (error) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      throw error;
+    }
   } catch (error) {
     setUpdaterState("error", { message: error && error.message ? error.message : String(error) });
     return { ok: false, error: String(error) };
@@ -266,7 +436,6 @@ async function performUpdateAction() {
     updaterBusy = false;
   }
 }
-
 // ---------------------------------------------------------------------------
 // Toolchain
 // ---------------------------------------------------------------------------
