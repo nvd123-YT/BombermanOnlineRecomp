@@ -75,10 +75,11 @@ mode, FPS counter, audio, online play, and BBA/modem selection. By default it fo
 mode (fullscreen in Big Picture, windowed on desktop); the display setting can override that. Launching
 the app normally still opens the existing Bomberman launcher.
 
-The current SDK does not have a Dreamcast-specific content check for CHD/GDI/CUE images, and the
-Redump multi-track record is not a CRC/size match for any one of those selected files. The profile
-therefore does not claim a verified-dump badge. No `prepare` step is needed: release builds already
-contain the native executable and read the player's disc image at runtime.
+The current SDK does not read a Dreamcast game ID from CHD/GDI/CUE images. Redump records this
+release as one CUE sheet plus three separate BIN tracks; checking the CUE's own CRC would not verify
+the referenced track data. The profile therefore omits `game.dumps` rather than claim a verified
+full-disc badge from a partial check. No `prepare` step is needed: release builds already contain
+the native executable and read the player's disc image at runtime.
 
 ## Prebuilt release pipeline
 
