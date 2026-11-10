@@ -745,6 +745,29 @@ function testConnection(host, port, timeout = 5000) {
 // ---------------------------------------------------------------------------
 // Window
 // ---------------------------------------------------------------------------
+function ensureLauncherLogo() {
+  const destination = path.join(__dirname, "ui", "bomberman-online-logo.png");
+  if (fs.existsSync(destination)) return;
+
+  // In a source checkout, copy the root-level uploaded logo into the UI's local asset folder.
+  // Packaged builds already contain this file because sync.js copies it before electron-builder.
+  const candidates = [
+    path.join(BUNDLED_ROOT, "9462-1643360380.png"),
+    path.resolve(__dirname, "..", "..", "9462-1643360380.png"),
+  ];
+  const source = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!source) {
+    console.warn("[Launcher] Bomberman Online logo asset was not found.");
+    return;
+  }
+  try {
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.copyFileSync(source, destination);
+  } catch (error) {
+    console.warn(`[Launcher] Couldn't prepare the logo asset: ${error.message}`);
+  }
+}
+
 function createWindow() {
   const isMac = process.platform === "darwin";
   win = new BrowserWindow({
@@ -1248,6 +1271,7 @@ function launchRecompLauncherGame() {
 // Lifecycle
 // ---------------------------------------------------------------------------
 app.whenReady().then(() => {
+  ensureLauncherLogo();
   prepareWorkspace();
   if (launchRecompLauncherGame()) return;
   if (!app.isPackaged) setUpdaterState("development", { message: "Updates are available in packaged releases." });
