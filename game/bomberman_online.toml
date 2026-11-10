@@ -31,7 +31,26 @@ extra = [0x0C0F85AE,  # called 498 times in the first run
          0x0C1EA932,  # called 1 time; reached once modem probe returns 0xFFFFFFFF
          0x0C1EA93C,  # called 1 time
          0x0C1EAA04,  # called 1 time
-         0x0C1EAA16]  # called 1 time
+         0x0C1EAA16,  # called 1 time
+         # Leaf functions reached only through function-pointer tables. The sweep pass only
+         # recognises stack-frame prologues (sts.l pr / mov.l rN,@-r15), so these routines --
+         # which start with a pc-relative literal load or an add to r15 -- stayed undiscovered
+         # even though they are ordinary rts-terminated functions. Each address below was
+         # confirmed by disassembly.
+         0x0C1FE1A0, 0x0C1FE414, 0x0C1FE4B6, 0x0C1FE4CE, 0x0C1FE4EC, 0x0C1FE50A,
+         0x0C1FE580, 0x0C1FE6A0, 0x0C1FE76E, 0x0C1FE7E0, 0x0C1FE7FE, 0x0C1FE81C,
+         0x0C1FE85A, 0x0C1FE8B2, 0x0C1FE8D2, 0x0C1FE958, 0x0C1FE976, 0x0C1FE9E0,
+         0x0C1FF190,
+         # Whole code block sitting in a gap between known functions; full callee-save prologues.
+         0x0C21AE60, 0x0C21B160, 0x0C21B440, 0x0C21B6E0,
+         # Recovered leaf functions and four-byte rts stubs in the 0x24/0x25 region.
+         0x0C23E05A, 0x0C2448E4, 0x0C2448FA, 0x0C244900, 0x0C244916, 0x0C244922,
+         0x0C244C9E, 0x0C24AE1E, 0x0C24AE22, 0x0C24AE26, 0x0C24AE2A,
+         0x0C24AF32, 0x0C24AF36, 0x0C24AF3A, 0x0C24AF3E, 0x0C24AF42, 0x0C24AF46,
+         0x0C24AF4A, 0x0C24AF4E, 0x0C24AF52, 0x0C24AF56, 0x0C24AF5A,
+         0x0C24DB8A, 0x0C24EF6E, 0x0C24F30C, 0x0C24FD1C, 0x0C24FEC6,
+         0x0C250112, 0x0C2515BA, 0x0C251614, 0x0C251654, 0x0C251658, 0x0C25165C,
+         0x0C251660, 0x0C251CC4, 0x0C251CCC, 0x0C255914, 0x0C266B6C]
 
 # Regions the program copied out of the image and ran elsewhere (first 600-frame run). The
 # 0x8C000000/0x8C000100/0x8C000400/0x8C000600 group is the exception/interrupt entry area; the
