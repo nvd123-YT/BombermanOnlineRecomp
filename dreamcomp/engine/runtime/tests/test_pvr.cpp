@@ -119,6 +119,45 @@ TEST_CASE("pvr: 64-byte headers and vertices, sprites and modifier volumes are s
     CHECK(r.core.ta.lists[pvr::kOpaque].polygons == 0);
 }
 
+TEST_CASE("pvr: STARTRENDER freezes the TA stream without losing the previous capture") {
+    Rig r;
+    auto& m = r.sys.memory;
+    r.list_init();
+    r.chunk(Rig::pcw(pvr::kPolygonOrModVol, pvr::kOpaque));
+    r.chunk(Rig::pcw(pvr::kVertex, 0, 0, true));
+    r.chunk(Rig::pcw(pvr::kEndOfList, pvr::kOpaque));
+    const auto first = r.core.ta.stream;
+    std::vector<std::uint32_t> callback_stream;
+    r.core.on_render = [&](const std::vector<std::uint32_t>& stream) {
+        callback_stream = stream;
+    };
+
+    m.write32(0xA05F8014u, 0xFFFFFFFFu);  // START_RENDER
+    CHECK(callback_stream == first);
+    CHECK(r.core.ta.rendered_stream() == first);
+    CHECK(r.core.ta.stream.empty());  // builder storage was exchanged, not copied
+
+    r.list_init();
+    CHECK(r.core.ta.rendered_stream() == first);  // previous capture survives a new TA list
+    r.chunk(Rig::pcw(pvr::kPolygonOrModVol, pvr::kPunchThrough));
+    r.chunk(Rig::pcw(pvr::kEndOfList, pvr::kPunchThrough));
+    const auto second = r.core.ta.stream;
+    m.write32(0xA05F8014u, 0xFFFFFFFFu);
+    CHECK(callback_stream == second);
+    CHECK(r.core.ta.rendered_stream() == second);
+
+    // Some guests append to a list without reinitialising the TA after START_RENDER. Preserve the
+    // old cumulative stream in that uncommon path, using copy-on-write only when it is needed.
+    const auto old_size = r.core.ta.rendered_stream().size();
+    r.chunk(Rig::pcw(pvr::kPolygonOrModVol, pvr::kTranslucent));
+    CHECK(r.core.ta.stream.size() == old_size + 8);
+    CHECK(r.core.ta.invalid == 0);
+    const auto continued = r.core.ta.stream;
+    m.write32(0xA05F8014u, 0xFFFFFFFFu);
+    CHECK(callback_stream == continued);
+    CHECK(r.core.ta.rendered_stream() == continued);
+}
+
 TEST_CASE("pvr: STARTRENDER completes on the clock; texture and frame-buffer paths are tracked") {
     Rig r;
     auto& m = r.sys.memory;

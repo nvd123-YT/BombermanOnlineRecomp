@@ -54,9 +54,16 @@ void Ta::reset() noexcept {
     pending_v64_ = false;
     lists = {};
     stream.clear();
+    stream_swapped_ = false;
 }
 
 void Ta::feed(const std::uint32_t words[8]) {
+    // START_RENDER swaps the completed list into rendered_stream_. If a title continues appending
+    // to that same TA list without TA_LIST_INIT, preserve the original cumulative stream once.
+    if (stream_swapped_) {
+        stream = rendered_stream_;
+        stream_swapped_ = false;
+    }
     ++chunks;
     stream.insert(stream.end(), words, words + 8);
     // Second halves of 64-byte parameters carry no control word.
@@ -148,6 +155,13 @@ void Ta::feed(const std::uint32_t words[8]) {
     }
 }
 
+void Ta::prepare_render() noexcept {
+    if (stream_swapped_)
+        return;
+    rendered_stream_.swap(stream);
+    stream_swapped_ = true;
+}
+
 // ---- Core --------------------------------------------------------------------------------------
 
 Core::Core(sched::Scheduler& sched, holly::Intc& holly, Spg& spg, mem::DcMemory& memory)
@@ -189,15 +203,18 @@ void Core::reset() {
     regs_[0x110 >> 2] = 0x00090639u;  // FB_BURSTCTRL
     regs_[0x11C >> 2] = 0x000000FFu;  // PT_ALPHA_REF
     ta.reset();
+    ta.clear_rendered();
     fifo_fill_ = 0;
     seen_ta_data_ = false;
 }
 
 void Core::start_render() {
     ++renders;
+    ta.prepare_render();
     if (on_render)
-        on_render(ta.stream);
-    const std::uint64_t cycles = render_base_cycles + render_cycles_per_word * ta.stream.size();
+        on_render(ta.rendered_stream());
+    const std::uint64_t cycles =
+        render_base_cycles + render_cycles_per_word * ta.rendered_stream().size();
     sched_.request(render_event_, cycles);
 }
 

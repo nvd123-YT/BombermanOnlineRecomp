@@ -437,7 +437,6 @@ struct Live {
     // The guest has handed the hardware a display list. Draw it, then put the result where the
     // hardware would have put it.
     void render(const std::vector<std::uint32_t>& stream) {
-        last_stream = stream;  // kept so F11 can write the list that drew what is on screen
         decoder.reset();
         decoder.feed_stream(stream.data(), stream.size());
         // The plane the whole frame sits on is not in the stream: the title writes it into the
@@ -1026,9 +1025,10 @@ struct Live {
         char stem[64];
         std::snprintf(stem, sizeof stem, "capture-%03u", captures++);
         screenshot_to(std::string(stem) + ".ppm");
-        if (!last_stream.empty()) {
+        const auto& captured_stream = pvr_.ta.rendered_stream();
+        if (!captured_stream.empty()) {
             if (FILE* f = std::fopen((std::string(stem) + ".ta").c_str(), "wb")) {
-                std::fwrite(last_stream.data(), 4, last_stream.size(), f);
+                std::fwrite(captured_stream.data(), 4, captured_stream.size(), f);
                 std::fclose(f);
             }
         }
@@ -1053,7 +1053,7 @@ struct Live {
                          renderer.textures().overwritten);
             std::fprintf(f, "display: %s\n", shown.describe().c_str());
             std::fprintf(f, "source: %s\n", from_renderer ? "the renderer" : "video memory");
-            std::fprintf(f, "parameter words: %zu\n", last_stream.size());
+            std::fprintf(f, "parameter words: %zu\n", captured_stream.size());
             std::fclose(f);
         }
         std::printf("captured %s.{ppm,ta,vram,vram.regs,txt} at guest frame %llu\n", stem,
@@ -1109,7 +1109,6 @@ struct Live {
                   decoded_frames = 0, backgrounds = 0;
     std::uint32_t target_address = 0;
     std::uint64_t guest_frame = 0;
-    std::vector<std::uint32_t> last_stream;
     unsigned screenshots = 0, captures = 0;
     // The on-screen counter. Two numbers, because they answer different questions: how smooth it
     // looks (frames actually presented per second of wall clock) and whether it is keeping up
@@ -2532,10 +2531,9 @@ int main(int argc, char** argv) {
                             static_cast<unsigned long long>(sys.spg.frames()));
                 while (ext_paused()) {
                     for (auto* e : dream::host::extensions()) e->on_paused_tick();
-                    if (!live->last_stream.empty()) {
-                        const std::vector<std::uint32_t> stream = live->last_stream;
+                    const auto& stream = pvr.ta.rendered_stream();
+                    if (!stream.empty())
                         live->render(stream);
-                    }
                     if (!live->present(sys.spg.frames(), sys.ctx.cycles))
                         throw StopRun{"the window was closed"};
                     std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -2653,11 +2651,15 @@ int main(int argc, char** argv) {
     dream::aica::Aica aica(sys.sched, sys.holly, sys.memory);
     aica.mixer.soft_clip = &soft_clip;
     sys.memory.map_mmio(dream::aica::Aica::kRegBase, dream::aica::Aica::kRegEnd, &aica);
-    // ARM7 program-counter histogram sampled once per 44.1 kHz tick (where the driver spends its
-    // time), and the optional recording.
-    // A count per instruction slot of the 2 MB sound RAM (dreamcomp): a hash map here cost ~1 % of
-    // the game thread, at 44 100 updates a second.
-    std::vector<std::uint32_t> arm_pcs((dream::aica::Arm7::kAramMask + 1) / 4, 0);
+    // Optional ARM7 program-counter histogram (DREAM_AICA_PROFILE=1), sampled once per
+    // 44.1 kHz tick. Disabled in normal runs so diagnostic counting stays out of the audio path.
+    const bool profile_arm_pcs = [] {
+        const char* e = std::getenv("DREAM_AICA_PROFILE");
+        return e && *e && *e != '0';
+    }();
+    std::vector<std::uint32_t> arm_pcs;
+    if (profile_arm_pcs)
+        arm_pcs.resize((dream::aica::Arm7::kAramMask + 1) / 4);
     std::vector<std::int16_t> pcm;  // interleaved L/R
 #ifdef DREAM_WITH_AUDIO
     // Playback follows the window by default: a run with a picture should have sound, and a
@@ -2682,7 +2684,8 @@ int main(int argc, char** argv) {
     (void)no_audio;
 #endif
     aica.on_sample = [&](std::int16_t l, std::int16_t r) {
-        ++arm_pcs[(aica.arm.next_pc() & dream::aica::Arm7::kAramMask) >> 2];
+        if (profile_arm_pcs)
+            ++arm_pcs[(aica.arm.next_pc() & dream::aica::Arm7::kAramMask) >> 2];
 #ifdef DREAM_WITH_AUDIO
         if (volume_percent != 100) {  // --volume (dreamcomp); --wav keeps the mixer's own level
             sink.push(static_cast<std::int16_t>(l * volume_percent / 100),
@@ -3140,7 +3143,7 @@ int main(int argc, char** argv) {
             std::fclose(f);
         }
     }
-    {
+    if (profile_arm_pcs) {
         std::vector<std::pair<std::uint64_t, std::uint32_t>> top;
         for (std::size_t i = 0; i < arm_pcs.size(); ++i)
             if (arm_pcs[i])

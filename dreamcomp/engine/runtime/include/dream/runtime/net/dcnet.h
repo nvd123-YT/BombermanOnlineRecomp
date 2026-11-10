@@ -67,7 +67,7 @@ private:
     void fail();
 
     Socket socket_ = -1;
-    Mode mode_ = Mode::Ethernet;
+    std::atomic<Mode> mode_{Mode::Ethernet};
     std::string endpoint_;
     bool verbose_ = false;
 

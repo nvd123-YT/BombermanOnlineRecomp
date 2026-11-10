@@ -15,10 +15,12 @@
 
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "dream/runtime/holly/intc.h"
@@ -58,7 +60,7 @@ public:
     // Run-report counters.
     std::uint64_t rx_frames = 0, tx_frames = 0;
     std::atomic<std::uint64_t> rx_dropped{0};
-    bool online_started() const noexcept { return online_started_; }
+    bool online_started() const noexcept { return online_started_.load(std::memory_order_acquire); }
     bool online_connected() const noexcept { return net_.connected(); }
     const std::string& online_endpoint() const noexcept { return net_.endpoint(); }
 
@@ -169,6 +171,7 @@ private:
     void transmit();
     bool transmit_one(unsigned descriptor);
     void ensure_online();
+    void reconnect_main();
     void reset_rx_ring(std::uint32_t size);
 
     // EEPROM bit-banging
@@ -186,7 +189,16 @@ private:
     Config config_;
     net::DcNetClient net_;
     int poll_event_ = -1;
-    bool online_started_ = false;
+    std::atomic<bool> online_started_{false};
+    // Socket lifecycle operations are serialized because retries run independently of the
+    // emulation thread. The retry worker never owns the BBA state or RX queue.
+    std::mutex net_control_mutex_;
+    std::mutex reconnect_mutex_;
+    std::condition_variable reconnect_cv_;
+    std::thread reconnect_thread_;
+    bool reconnect_shutdown_ = false;  // guarded by reconnect_mutex_
+    bool reconnect_ready_ = false;     // guarded by reconnect_mutex_
+    std::string online_host_;          // guarded by reconnect_mutex_
 
     std::array<std::uint8_t, kGapsSize> gaps_{};
     std::array<std::uint8_t, kPciSize> pci_{};
