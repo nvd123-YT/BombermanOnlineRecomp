@@ -756,7 +756,10 @@ function createWindow() {
     },
   });
 
-  win.loadFile(path.join(__dirname, "ui", "index.html"));
+  win.loadFile(path.join(__dirname, "ui", "index.html")).catch((err) => {
+    console.error(`[Launcher] Couldn't load the UI: ${err.stack || err}`);
+    if (SELFTEST) app.exit(1);
+  });
 
   win.once("ready-to-show", () => {
     win.show();
@@ -770,68 +773,113 @@ function createWindow() {
 
   if (SELFTEST) {
     win.webContents.once("did-finish-load", () => {
-      setTimeout(() => runSelftest(), 900);
+      setTimeout(() => {
+        runSelftest().catch((err) => {
+          // Last-resort guard: no self-test rejection should leave CI waiting forever.
+          console.error(`SELFTEST_FATAL ${err && (err.stack || err)}`);
+          app.exit(1);
+        });
+      }, 900);
+    });
+    win.webContents.once("render-process-gone", (_event, details) => {
+      console.error(`SELFTEST_RENDERER_GONE ${JSON.stringify(details)}`);
+      app.exit(1);
     });
   }
+}
+
+function withSelftestTimeout(promise, timeoutMs, label) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
 }
 
 async function runSelftest() {
   const failures = [];
   let report = null;
-  try {
-    report = await win.webContents.executeJavaScript("window.__selftest()");
-  } catch (err) {
-    failures.push(`selftest JS failed: ${err}`);
-  }
-  if (report && report.failures) failures.push(...report.failures);
+  let stats = null;
+  let screenshot = null;
 
-  const image = await win.webContents.capturePage();
-  const size = image.getSize();
-  const bmp = image.getBitmap(); // BGRA
-  const seen = new Set();
-  let dark = 0;
-  let bright = 0;
-  let accent = 0;
-  let total = 0;
-  let sum = 0;
-  for (let y = 0; y < size.height; y += 3) {
-    for (let x = 0; x < size.width; x += 3) {
-      const i = (y * size.width + x) * 4;
-      const b = bmp[i], g = bmp[i + 1], r = bmp[i + 2];
-      if (seen.size < 5000) seen.add((r >> 3) << 10 | (g >> 3) << 5 | (b >> 3));
-      const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-      sum += lum;
-      total++;
-      if (lum < 0.22) dark++;
-      if (lum > 0.6) bright++;
-      if (r > 170 && g < 130 && b < 110) accent++;
+  try {
+    if (!win || win.isDestroyed() || win.webContents.isDestroyed()) {
+      throw new Error("launcher window was destroyed before self-test");
     }
-  }
-  const stats = {
-    width: size.width,
-    height: size.height,
-    uniqueColors: seen.size,
-    meanLuminance: +(sum / total).toFixed(3),
-    darkRatio: +(dark / total).toFixed(3),
-    brightRatio: +(bright / total).toFixed(3),
-    accentRatio: +(accent / total).toFixed(4),
-  };
-  if (stats.uniqueColors < 40) failures.push("capture looks blank (too few colours)");
-  if (stats.darkRatio < 0.5) failures.push("background is not dark as designed");
-  // CI headless rendering has limited bright pixels; use a lenient threshold.
-  const brightThreshold = process.env.CI ? 0.001 : 0.005;
-  if (stats.brightRatio < brightThreshold) failures.push("no visible text pixels detected");
-  if (stats.accentRatio < 0.0005) failures.push("accent colour not visible");
 
-  const png = path.join(__dirname, "selftest.png");
-  try {
-    fs.writeFileSync(png, image.toPNG());
+    console.log("SELFTEST_PHASE renderer");
+    report = await withSelftestTimeout(
+      win.webContents.executeJavaScript("window.__selftest()"),
+      20_000,
+      "renderer self-test"
+    );
+    if (report && report.failures) failures.push(...report.failures);
+
+    console.log("SELFTEST_PHASE screenshot");
+    const image = await withSelftestTimeout(
+      win.webContents.capturePage(),
+      20_000,
+      "Electron screenshot capture"
+    );
+    const size = image.getSize();
+    if (!size.width || !size.height) {
+      throw new Error(`screenshot has invalid dimensions: ${size.width}x${size.height}`);
+    }
+    const bmp = image.getBitmap(); // BGRA
+    if (bmp.length < size.width * size.height * 4) {
+      throw new Error(`screenshot bitmap is incomplete: ${bmp.length} bytes for ${size.width}x${size.height}`);
+    }
+
+    const seen = new Set();
+    let dark = 0;
+    let bright = 0;
+    let accent = 0;
+    let total = 0;
+    let sum = 0;
+    for (let y = 0; y < size.height; y += 3) {
+      for (let x = 0; x < size.width; x += 3) {
+        const i = (y * size.width + x) * 4;
+        const b = bmp[i], g = bmp[i + 1], r = bmp[i + 2];
+        if (seen.size < 5000) seen.add((r >> 3) << 10 | (g >> 3) << 5 | (b >> 3));
+        const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+        sum += lum;
+        total++;
+        if (lum < 0.22) dark++;
+        if (lum > 0.6) bright++;
+        if (r > 170 && g < 130 && b < 110) accent++;
+      }
+    }
+
+    stats = {
+      width: size.width,
+      height: size.height,
+      uniqueColors: seen.size,
+      meanLuminance: +(sum / total).toFixed(3),
+      darkRatio: +(dark / total).toFixed(3),
+      brightRatio: +(bright / total).toFixed(3),
+      accentRatio: +(accent / total).toFixed(4),
+    };
+    if (stats.uniqueColors < 40) failures.push("capture looks blank (too few colours)");
+    if (stats.darkRatio < 0.5) failures.push("background is not dark as designed");
+    // CI headless rendering has limited bright pixels; use a lenient threshold.
+    const brightThreshold = process.env.CI ? 0.001 : 0.005;
+    if (stats.brightRatio < brightThreshold) failures.push("no visible text pixels detected");
+    if (stats.accentRatio < 0.0005) failures.push("accent colour not visible");
+
+    screenshot = path.join(__dirname, "selftest.png");
+    try {
+      fs.writeFileSync(screenshot, image.toPNG());
+    } catch (err) {
+      failures.push(`could not save screenshot: ${err}`);
+    }
   } catch (err) {
-    failures.push(`could not save screenshot: ${err}`);
+    failures.push(`self-test execution failed: ${err && (err.stack || err)}`);
+  } finally {
+    console.log("SELFTEST_RESULT " + JSON.stringify({ report, stats, failures, screenshot }, null, 2));
+    app.exit(failures.length ? 1 : 0);
   }
-
-  console.log("SELFTEST_RESULT " + JSON.stringify({ report, stats, failures, screenshot: png }, null, 2));
-  app.exit(failures.length ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------
