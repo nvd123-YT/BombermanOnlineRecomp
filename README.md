@@ -47,7 +47,7 @@ The Electron launcher replaces the old Tk UI. Build and run it:
 
 ```sh
 cd tools/launcher
-npm install
+npm ci
 npm start                      # dev mode
 npm run selftest               # verify UI renders on all platforms
 npm run package                # electron-builder: .dmg/.zip (macOS), .exe/.zip (Windows), .AppImage/.deb/.tar.gz (Linux)
@@ -60,8 +60,7 @@ test, controller test, remap editor, streaming logs, and settings persistence.
 **Release downloads are prebuilt:** choose your own disc image once and press **Play**. The
 bundled native executable starts directly; the launcher does not run CMake, Ninja, Python, a
 compiler, or a local recompilation. The disc image is passed to the game for GD-ROM reads. The
-**Build** action is only for developer/source checkouts; packaged releases do not rebuild. User
-settings and VMU saves remain in the writable app-data workspace across application updates. Windows NSIS and supported Linux AppImage/DEB installs check GitHub Releases for updates automatically; the status-bar update control downloads and installs them. macOS builds are currently unsigned, so the same control opens Releases for a manual DMG replacement. Update manifests and blockmaps are published alongside each package.
+**Build** action is only for developer/source checkouts; packaged releases do not rebuild. User settings and VMU saves remain in the writable app-data workspace across application updates. The status-bar **Check for updates** control checks GitHub Releases, downloads the matching Windows/macOS package (or Linux AppImage), verifies its SHA-256 checksum, and installs it after the launcher closes. The macOS helper replaces the \`.app\` bundle directly, so an ad-hoc/unsigned build can update without Electron's signed-app updater. Linux \`.deb\` and \`.tar.gz\` installs use the Releases page; portable AppImages can update in-app. Disc selection, launcher settings, bindings and the VMU are stored outside the application bundle and are retained.
 
 ## Prebuilt release pipeline
 
