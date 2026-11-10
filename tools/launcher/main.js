@@ -30,6 +30,14 @@ const EXE = path.join(
 // so a distributed app that has never seen this machine's disc must extract before building.
 const EXTRACTED = path.join(ROOT, "game", "extracted", "fs", "1ST_READ.BIN");
 const SELFTEST = process.argv.includes("--selftest");
+let selftestWatchdog = null;
+
+if (SELFTEST) {
+  process.on("unhandledRejection", (reason) => {
+    console.error(`SELFTEST_UNHANDLED_REJECTION ${reason && (reason.stack || reason)}`);
+    app.exit(1);
+  });
+}
 
 const DEFAULTS = {
   disc: "",
@@ -772,6 +780,11 @@ function createWindow() {
   });
 
   if (SELFTEST) {
+    selftestWatchdog = setTimeout(() => {
+      console.error("SELFTEST_TIMEOUT: renderer did not finish and complete the test within 60 seconds");
+      app.exit(1);
+    }, 60_000);
+
     win.webContents.once("did-finish-load", () => {
       setTimeout(() => {
         runSelftest().catch((err) => {
@@ -780,6 +793,12 @@ function createWindow() {
           app.exit(1);
         });
       }, 900);
+    });
+    win.webContents.once("did-fail-load", (_event, code, description, url, isMainFrame) => {
+      if (isMainFrame) {
+        console.error(`SELFTEST_LOAD_FAILED ${code}: ${description} (${url})`);
+        app.exit(1);
+      }
     });
     win.webContents.once("render-process-gone", (_event, details) => {
       console.error(`SELFTEST_RENDERER_GONE ${JSON.stringify(details)}`);
@@ -877,6 +896,10 @@ async function runSelftest() {
   } catch (err) {
     failures.push(`self-test execution failed: ${err && (err.stack || err)}`);
   } finally {
+    if (selftestWatchdog) {
+      clearTimeout(selftestWatchdog);
+      selftestWatchdog = null;
+    }
     console.log("SELFTEST_RESULT " + JSON.stringify({ report, stats, failures, screenshot }, null, 2));
     app.exit(failures.length ? 1 : 0);
   }
