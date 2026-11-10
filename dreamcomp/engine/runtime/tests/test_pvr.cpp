@@ -149,8 +149,9 @@ TEST_CASE("pvr: STARTRENDER freezes the TA stream without losing the previous ca
     // Some guests append to a list without reinitialising the TA after START_RENDER. Preserve the
     // old cumulative stream in that uncommon path, using copy-on-write only when it is needed.
     const auto old_size = r.core.ta.rendered_stream().size();
-    r.chunk(Rig::pcw(pvr::kVertex, 0, 0, true));
+    r.chunk(Rig::pcw(pvr::kPolygonOrModVol, pvr::kTranslucent));
     CHECK(r.core.ta.stream.size() == old_size + 8);
+    CHECK(r.core.ta.invalid == 0);
     const auto continued = r.core.ta.stream;
     m.write32(0xA05F8014u, 0xFFFFFFFFu);
     CHECK(callback_stream == continued);
