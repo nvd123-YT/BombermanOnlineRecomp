@@ -175,6 +175,7 @@ function prepareWorkspace() {
   console.log(`workspace seeded at ${ROOT}`);
 }
 
+let win = null;
 let child = null;
 
 const RELEASES_URL = "https://github.com/nvd123-YT/BombermanOnlineRecomp/releases";
