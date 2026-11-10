@@ -13,7 +13,7 @@
     "start": "electron .",
     "selftest": "electron . --selftest",
     "sync": "node sync.js",
-    "package": "node sync.js && electron-builder --publish never"
+    "package": "node sync.js && electron-builder --publish never && node add-recomplauncher.js"
   },
   "devDependencies": {
     "electron": "^38.0.0",
@@ -46,7 +46,9 @@
       "maintainer": "nvd123-YT <nvd123-yt@users.noreply.github.com>",
       "artifactName": "${productName}-${version}-linux-${arch}.${ext}"
     },
-    "nsis": { "runAfterFinish": false },
+    "nsis": {
+      "runAfterFinish": false
+    },
     "files": [
       "main.js",
       "preload.js",
@@ -67,6 +69,7 @@
     ],
     "directories": {
       "output": "dist"
-    }
+    },
+    "afterPack": "after-pack.js"
   }
 }

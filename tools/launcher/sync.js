@@ -25,7 +25,7 @@ function skip(rel) {
   return false;
 }
 
-const ENTRIES = ["CMakeLists.txt", "src", "game", "dreamcomp", "README.md", "LICENSE"];
+const ENTRIES = ["CMakeLists.txt", "src", "game", "dreamcomp", "README.md", "LICENSE", "recomplauncher.json"];
 
 for (const name of ENTRIES) {
   const from = path.join(ROOT, name);

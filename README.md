@@ -62,6 +62,23 @@ bundled native executable starts directly; the launcher does not run CMake, Ninj
 compiler, or a local recompilation. The disc image is passed to the game for GD-ROM reads. The
 **Build** action is only for developer/source checkouts; packaged releases do not rebuild. User settings and VMU saves remain in the writable app-data workspace across application updates. The status-bar **Check for updates** control checks GitHub Releases, downloads the matching Windows/macOS package (or Linux AppImage), verifies its SHA-256 checksum, and installs it after the launcher closes. The macOS helper replaces the .app bundle directly, so an ad-hoc/unsigned build can update without Electron's signed-app updater. Linux .deb and .tar.gz installs use the Releases page; portable AppImages can update in-app. Disc selection, launcher settings, bindings and the VMU are stored outside the application bundle and are retained.
 
+## RecompLauncher
+
+**Works with [RecompLauncher](https://recomplauncher.com).** Release ZIPs include
+`recomplauncher.json` at their top level, and the Linux AppImage embeds it at its AppDir root.
+In RecompLauncher, select your own USA Dreamcast image (`.chd`, `.gdi`, or `.cue` with its
+associated `.bin` tracks). It starts the bundled native game directly without opening the
+standalone Electron interface.
+
+The RecompLauncher settings page exposes render scale (1x–8x), aspect ratio, VSync, window/fullscreen
+mode, FPS counter, audio, online play, and BBA/modem selection. Launching the app normally still
+opens the existing Bomberman launcher.
+
+The current SDK does not have a Dreamcast-specific content check for CHD/GDI/CUE images, and the
+Redump multi-track record is not a CRC/size match for any one of those selected files. The profile
+therefore does not claim a verified-dump badge. No `prepare` step is needed: release builds already
+contain the native executable and read the player's disc image at runtime.
+
 ## Prebuilt release pipeline
 
 Every release job checks out the boot executable from the private

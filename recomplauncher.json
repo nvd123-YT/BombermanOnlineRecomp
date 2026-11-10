@@ -1,0 +1,216 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "Bomberman Online",
+  "repo": "nvd123-YT/BombermanOnlineRecomp",
+  "game": {
+    "kind": "iso",
+    "label": "Your own USA Bomberman Online Dreamcast disc image (MK-51065 V1.004). Supported formats: .chd, .gdi, or .cue with its .bin tracks."
+  },
+  "start": {
+    "program": [
+      "Bomberman Online Launcher.exe",
+      "Bomberman Online Launcher.app",
+      "Bomberman Online Launcher.AppImage"
+    ],
+    "args": [
+      "--game",
+      "{game}"
+    ]
+  },
+  "settings": [
+    {
+      "id": "render_scale",
+      "label": "Render scale",
+      "group": "Video",
+      "in": "args",
+      "help": "1x is the native scale. Higher scales render more pixels and can be more demanding; the actual output size depends on the display and aspect ratio.",
+      "choices": [
+        {
+          "label": "1x (Native)",
+          "args": []
+        },
+        {
+          "label": "2x",
+          "args": [
+            "--bmo-scale",
+            "2"
+          ]
+        },
+        {
+          "label": "3x",
+          "args": [
+            "--bmo-scale",
+            "3"
+          ]
+        },
+        {
+          "label": "4x",
+          "args": [
+            "--bmo-scale",
+            "4"
+          ]
+        },
+        {
+          "label": "5x",
+          "args": [
+            "--bmo-scale",
+            "5"
+          ]
+        },
+        {
+          "label": "6x",
+          "args": [
+            "--bmo-scale",
+            "6"
+          ]
+        },
+        {
+          "label": "7x",
+          "args": [
+            "--bmo-scale",
+            "7"
+          ]
+        },
+        {
+          "label": "8x",
+          "args": [
+            "--bmo-scale",
+            "8"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aspect_ratio",
+      "label": "Aspect ratio",
+      "group": "Video",
+      "in": "args",
+      "choices": [
+        {
+          "label": "Original (4:3)",
+          "args": []
+        },
+        {
+          "label": "Widescreen (16:9)",
+          "args": [
+            "--bmo-widescreen"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vsync",
+      "label": "VSync",
+      "group": "Video",
+      "in": "args",
+      "choices": [
+        {
+          "label": "Off",
+          "args": []
+        },
+        {
+          "label": "On",
+          "args": [
+            "--bmo-vsync"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "display_mode",
+      "label": "Display mode",
+      "group": "Video",
+      "in": "args",
+      "choices": [
+        {
+          "label": "Windowed",
+          "args": []
+        },
+        {
+          "label": "Fullscreen",
+          "args": [
+            "--bmo-fullscreen"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fps_counter",
+      "label": "FPS counter",
+      "group": "Video",
+      "in": "args",
+      "choices": [
+        {
+          "label": "Off",
+          "args": []
+        },
+        {
+          "label": "On",
+          "args": [
+            "--bmo-fps"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "audio",
+      "label": "Audio",
+      "group": "Audio",
+      "in": "args",
+      "choices": [
+        {
+          "label": "On",
+          "args": []
+        },
+        {
+          "label": "Off",
+          "args": [
+            "--bmo-no-audio"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "online",
+      "label": "Online play",
+      "group": "Online",
+      "in": "args",
+      "help": "Enable Bomberman Online's DCNet connection. Requires a working internet connection.",
+      "choices": [
+        {
+          "label": "Off",
+          "args": []
+        },
+        {
+          "label": "On (DCNet)",
+          "args": [
+            "--bmo-online"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "connection",
+      "label": "Connection type",
+      "group": "Online",
+      "in": "args",
+      "help": "Choose the connection emulated by the game. The Broadband Adapter is recommended for most players.",
+      "choices": [
+        {
+          "label": "Broadband Adapter",
+          "args": []
+        },
+        {
+          "label": "Modem",
+          "args": [
+            "--bmo-modem"
+          ]
+        }
+      ]
+    }
+  ],
+  "requires": [
+    "settings.args"
+  ]
+}
