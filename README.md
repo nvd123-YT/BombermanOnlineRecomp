@@ -136,6 +136,6 @@ The repository root \`index.html\` is the **Bomberman Online Recompiled** homepa
 
 The dashboard is Bomberman-only. Its Cloudflare Worker polls DCNet's public \`/status/api/players\` feed once per minute and accepts only the exact game ID \`bomberman\`. Cloudflare D1 stores pseudonymous player identities, daily activity, session estimates, and concurrent-player snapshots.
 
-**Statistics collection needs one-time Cloudflare setup.** Follow [\`stats/SETUP.md\`](stats/SETUP.md) to create the D1 database, set the private \`PLAYER_HASH_SECRET\`, deploy the Worker, and connect its URL in \`index.html\`. Until then, the homepage deliberately displays no fabricated counts.
+**Statistics collection is not live yet.** The D1 database has been created and configured in \`stats/wrangler.toml\`; the remaining steps are to initialize its schema, set the private \`PLAYER_HASH_SECRET\`, deploy the Worker, and connect the Worker URL in \`index.html\`. Follow [\`stats/SETUP.md\`](stats/SETUP.md). Until the collector is connected, the homepage deliberately displays no fabricated counts.
 
 Raw usernames are not stored. Unique-player tracking begins when the collector is first deployed; DCNet's live feed does not provide historical records for earlier players. Polling once per minute can also miss very short sessions.
