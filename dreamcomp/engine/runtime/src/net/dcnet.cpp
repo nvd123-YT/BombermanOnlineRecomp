@@ -133,16 +133,16 @@ DcNetClient::~DcNetClient() { stop(); }
 bool DcNetClient::start(const std::string& host, std::uint16_t port, Mode mode, std::string& error) {
     if (running_.load())
         return true;
+    // Establish the endpoint label before the first connection attempt, including failed ones.
+    // BBA reconnects reuse this host, so report readers never race a string rewrite later.
+    if (endpoint_.empty())
+        endpoint_ = host + ":" + std::to_string(port);
     const NativeSocket sock = connect_tcp(host, port, error);
     if (sock == kInvalidSocket)
         return false;
 
     socket_ = static_cast<Socket>(sock);
     mode_.store(mode, std::memory_order_release);
-    // BBA reconnects always target the same endpoint. Keeping the established label stable avoids
-    // racing report/UI readers with redundant string assignments on every retry.
-    if (endpoint_.empty())
-        endpoint_ = host + ":" + std::to_string(port);
     stop_.store(false);
     connected_.store(true);
     running_.store(true);
