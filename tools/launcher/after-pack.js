@@ -4,6 +4,10 @@ const fs = require("fs");
 const path = require("path");
 
 module.exports = async function afterPack(context) {
+  // The Mac ZIP post-processor adds the profile beside the .app bundle. Keep
+  // the bundle itself free of extra root-level files.
+  if (context.electronPlatformName === "darwin") return;
+
   const source = path.join(__dirname, "recomplauncher.json");
   const target = path.join(context.appOutDir, "recomplauncher.json");
   if (!fs.existsSync(source)) {
