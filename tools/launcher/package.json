@@ -15,9 +15,6 @@
     "sync": "node sync.js",
     "package": "node sync.js && electron-builder --publish never"
   },
-  "dependencies": {
-    "electron-updater": "6.8.12"
-  },
   "devDependencies": {
     "electron": "^38.0.0",
     "electron-builder": "^25.1.8"
@@ -46,9 +43,14 @@
       ],
       "maintainer": "nvd123-YT <nvd123-yt@users.noreply.github.com>"
     },
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "files": [
       "main.js",
       "preload.js",
+      "build-info.json",
+      "update-macos.sh",
+      "update-windows.ps1",
+      "update-linux.sh",
       "ui/**",
       "node_modules/**",
       "package.json",
@@ -59,13 +61,6 @@
       "CMakeLists.txt",
       "README.md",
       "LICENSE"
-    ],
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "nvd123-YT",
-        "repo": "BombermanOnlineRecomp"
-      }
     ],
     "directories": {
       "output": "dist"
