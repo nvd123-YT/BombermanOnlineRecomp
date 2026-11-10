@@ -8,6 +8,7 @@ let saveTimer = null;
 let running = false;
 let toastTimer = null;
 let netBusy = false;
+let updateStatus = { state: "idle" };
 
 const MAX_LOG_LINES = 2500;
 let logLines = 0;
@@ -571,6 +572,7 @@ function pollPads(now) {
 
 function renderUpdateState(state) {
   if (!state) return;
+  updateStatus = state;
   const btn = $("updateBtn");
   const labels = {
     idle: "Check for updates",
@@ -578,15 +580,15 @@ function renderUpdateState(state) {
     checking: "Checking…",
     available: `Download ${state.availableVersion || "update"}`,
     downloading: state.percent == null ? "Downloading…" : `Downloading ${state.percent}%`,
-    downloaded: "Restart to update",
+    installing: "Installing…",
     current: "Up to date",
     manual: "Download update",
     error: "Retry update",
   };
   btn.textContent = labels[state.state] || "Check for updates";
-  btn.disabled = ["checking", "downloading"].includes(state.state);
+  btn.disabled = ["checking", "downloading", "installing"].includes(state.state);
   btn.title = state.message || "";
-  btn.classList.toggle("update-ready", state.state === "available" || state.state === "downloaded");
+  btn.classList.toggle("update-ready", state.state === "available");
 }
 
 async function updateAction() {
@@ -599,8 +601,8 @@ async function updateAction() {
   } catch (error) {
     toast(`Update check failed: ${error}`, "err");
   } finally {
-    // The next updater event will put the button back into its correct state.
-    setTimeout(() => { if (btn.isConnected) btn.disabled = false; }, 1200);
+    // Keep the button disabled only while the updater is actively working.
+    if (btn.isConnected) btn.disabled = ["checking", "downloading", "installing"].includes(updateStatus.state);
   }
 }
 
