@@ -1,6 +1,7 @@
 #include "dream/runtime/hw/bba.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <utility>
@@ -52,12 +53,25 @@ Bba::Bba(sched::Scheduler& sched, holly::Intc& intc, Config config)
     });
     net_.set_verbose(config_.verbose);
     reset();
+    reconnect_thread_ = std::thread(&Bba::reconnect_main, this);
 }
 
 Bba::~Bba() {
+    {
+        std::lock_guard<std::mutex> lock(reconnect_mutex_);
+        reconnect_shutdown_ = true;
+        reconnect_ready_ = false;
+        online_started_.store(false, std::memory_order_release);
+    }
+    reconnect_cv_.notify_all();
+    if (reconnect_thread_.joinable())
+        reconnect_thread_.join();
     if (poll_event_ >= 0)
         sched_.cancel(poll_event_);
-    net_.stop();
+    {
+        std::lock_guard<std::mutex> lock(net_control_mutex_);
+        net_.stop();
+    }
 }
 
 void Bba::start() {
@@ -209,8 +223,17 @@ void Bba::write(std::uint32_t addr, std::uint32_t value, unsigned size) {
                 if (value & 1u) {
                     std::printf("bba: bridge reset\n");
                     reset_rtl();
-                    net_.stop();
-                    online_started_ = false;
+                    {
+                        std::lock_guard<std::mutex> lock(reconnect_mutex_);
+                        reconnect_ready_ = false;
+                        online_host_.clear();
+                        online_started_.store(false, std::memory_order_release);
+                    }
+                    reconnect_cv_.notify_all();
+                    {
+                        std::lock_guard<std::mutex> lock(net_control_mutex_);
+                        net_.stop();
+                    }
                 }
             } else if (reg == kGapsDmaOffset) {
                 dma_offset_ = value & (kSramSize - 1u);
@@ -739,9 +762,8 @@ void Bba::prom_decode(std::uint8_t command) {
 // Transmit and receive
 
 void Bba::ensure_online() {
-    if (online_started_)
+    if (online_started_.exchange(true, std::memory_order_acq_rel))
         return;
-    online_started_ = true;
     std::string host = config_.server;
     if (config_.discover || host.empty()) {
         std::string error;
@@ -752,10 +774,80 @@ void Bba::ensure_online() {
             host = "dcnet.flyca.st";
     }
     std::string error;
-    if (net_.start(host, config_.port, net::DcNetClient::Mode::Ethernet, error)) {
+    bool connected = false;
+    {
+        std::lock_guard<std::mutex> lock(net_control_mutex_);
+        connected = net_.start(host, config_.port, net::DcNetClient::Mode::Ethernet, error);
+    }
+    {
+        std::lock_guard<std::mutex> lock(reconnect_mutex_);
+        online_host_ = host;
+        reconnect_ready_ = true;
+    }
+    reconnect_cv_.notify_all();
+    if (connected) {
         std::printf("bba: online through DCNet at %s\n", net_.endpoint().c_str());
     } else {
-        std::printf("bba: online unavailable (%s)\n", error.c_str());
+        std::printf("bba: online unavailable (%s); automatic reconnect enabled\n", error.c_str());
+    }
+}
+
+void Bba::reconnect_main() {
+    std::unique_lock<std::mutex> state_lock(reconnect_mutex_);
+    auto retry_delay = std::chrono::seconds(1);
+    while (!reconnect_shutdown_) {
+        reconnect_cv_.wait(state_lock, [this] {
+            return reconnect_shutdown_ || reconnect_ready_;
+        });
+        if (reconnect_shutdown_)
+            break;
+        // Check a live connection once a second. Failed connections use exponential backoff,
+        // capped at 30 seconds; the socket work is never done on the emulation thread.
+        if (reconnect_cv_.wait_for(state_lock, retry_delay, [this] {
+                return reconnect_shutdown_ || !reconnect_ready_;
+            })) {
+            retry_delay = std::chrono::seconds(1);
+            continue;
+        }
+        if (reconnect_shutdown_ || !reconnect_ready_)
+            continue;
+        const std::string host = online_host_;
+        state_lock.unlock();
+
+        bool connected = false;
+        std::string error;
+        {
+            std::lock_guard<std::mutex> net_lock(net_control_mutex_);
+            if (online_started_.load(std::memory_order_acquire)) {
+                if (net_.connected()) {
+                    connected = true;
+                } else {
+                    // A failed reader/writer leaves joinable threads behind. stop() joins them
+                    // before start() reuses the client.
+                    net_.stop();
+                    connected = net_.start(host, config_.port, net::DcNetClient::Mode::Ethernet, error);
+                    if (connected)
+                        std::printf("bba: reconnected through DCNet at %s\n",
+                                    net_.endpoint().c_str());
+                }
+            }
+        }
+
+        state_lock.lock();
+        if (reconnect_shutdown_)
+            break;
+        if (!reconnect_ready_ || !online_started_.load(std::memory_order_acquire)) {
+            retry_delay = std::chrono::seconds(1);
+            continue;
+        }
+        if (connected) {
+            retry_delay = std::chrono::seconds(1);
+        } else {
+            std::fprintf(stderr, "bba: DCNet reconnect failed (%s); retrying in %lld s\n",
+                         error.empty() ? "connection lost" : error.c_str(),
+                         static_cast<long long>(retry_delay.count()));
+            retry_delay = std::min(retry_delay * 2, std::chrono::seconds(30));
+        }
     }
 }
 
