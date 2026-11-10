@@ -1059,10 +1059,121 @@ ipcMain.handle("win:maximize", () => {
 ipcMain.handle("win:close", () => win && win.close());
 
 // ---------------------------------------------------------------------------
+// RecompLauncher direct launch
+// ---------------------------------------------------------------------------
+// RecompLauncher sets RECOMPLAUNCHER=1 and supplies the player's disc with --game.
+// Keep this path opt-in: ordinary standalone launches still open the existing UI.
+function launchRecompLauncherGame() {
+  if (process.env.RECOMPLAUNCHER !== "1") return false;
+
+  const fail = (message) => {
+    console.error(`[RecompLauncher] ${message}`);
+    app.exit(1);
+  };
+  const gameIndex = process.argv.indexOf("--game");
+  const suppliedDisc = gameIndex >= 0 ? process.argv[gameIndex + 1] : "";
+  if (!suppliedDisc || suppliedDisc.startsWith("--")) {
+    fail("No disc image was supplied. Reinstall the game copy in RecompLauncher and try again.");
+    return true;
+  }
+
+  const disc = path.resolve(suppliedDisc);
+  try {
+    if (!fs.statSync(disc).isFile()) {
+      fail("The selected game copy is not a disc-image file.");
+      return true;
+    }
+  } catch {
+    fail("The selected disc image could not be found.");
+    return true;
+  }
+  if (!fs.existsSync(EXE)) {
+    fail("The packaged Bomberman Online game executable is missing.");
+    return true;
+  }
+
+  const gameArgs = ["--config", CONFIG, "--disc", disc, "--window"];
+  const options = { online: false, conn: "bba", dcnet: true, server: "", serverPort: "" };
+
+  // These names are deliberately app-specific so Chromium/Electron doesn't consume them.
+  for (let i = gameIndex + 2; i < process.argv.length; i++) {
+    switch (process.argv[i]) {
+      case "--bmo-scale": {
+        const scale = Number(process.argv[i + 1]);
+        if (Number.isInteger(scale) && scale >= 1 && scale <= 8) {
+          if (scale !== 1) gameArgs.push("--scale", String(scale));
+          i++;
+        }
+        break;
+      }
+      case "--bmo-widescreen":
+        gameArgs.push("--render-aspect", (16 / 9).toFixed(4));
+        break;
+      case "--bmo-vsync":
+        gameArgs.push("--sync-display");
+        break;
+      case "--bmo-fullscreen":
+        gameArgs.push("--fullscreen");
+        break;
+      case "--bmo-fps":
+        gameArgs.push("--fps");
+        break;
+      case "--bmo-no-audio":
+        gameArgs.push("--no-audio");
+        break;
+      case "--bmo-online":
+        options.online = true;
+        break;
+      case "--bmo-modem":
+        options.conn = "modem";
+        break;
+    }
+  }
+
+  if (fs.existsSync(BINDINGS_USER)) gameArgs.push("--bindings", BINDINGS_USER);
+  try {
+    fs.mkdirSync(path.dirname(VMU), { recursive: true });
+    gameArgs.push("--vmu", VMU);
+  } catch (error) {
+    fail(`Couldn't prepare the VMU save path: ${error.message}`);
+    return true;
+  }
+
+  try {
+    child = spawn(EXE, gameArgs, {
+      cwd: ROOT,
+      env: toolEnv(onlineEnv(options)),
+      detached: process.platform !== "win32",
+      stdio: "inherit",
+    });
+    child.on("error", (error) => {
+      console.error(`[RecompLauncher] Couldn't start Bomberman Online: ${error.message}`);
+      child = null;
+      app.exit(1);
+    });
+    child.on("exit", (code) => {
+      child = null;
+      app.exit(Number.isInteger(code) ? code : 1);
+    });
+    process.once("SIGTERM", () => {
+      if (child) stopChild();
+    });
+    process.once("SIGINT", () => {
+      if (child) stopChild();
+    });
+  } catch (error) {
+    child = null;
+    fail(`Couldn't start Bomberman Online: ${error.message}`);
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 app.whenReady().then(() => {
   prepareWorkspace();
+  if (launchRecompLauncherGame()) return;
   if (!app.isPackaged) setUpdaterState("development", { message: "Updates are available in packaged releases." });
   createWindow();
   app.on("activate", () => {
