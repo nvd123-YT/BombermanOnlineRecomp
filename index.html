@@ -61,7 +61,7 @@ footer{border-top:1px solid #ffffff12;margin-top:48px;padding:25px 0 36px;color:
 </div></section></main>
 <footer><div class="wrap footer-inner"><div>Bomberman Online Recompiled · Community statistics</div><div class="footer-links"><a href="https://github.com/nvd123-YT/BombermanOnlineRecomp">GitHub</a><a href="https://github.com/nvd123-YT/BombermanOnlineRecomp/releases">Releases</a><a href="https://recomplauncher.com/">RecompLauncher</a></div></div></footer>
 <script>
-const STATS_API_BASE = ""; // Add the deployed Cloudflare Worker URL here after the collector is deployed.
+const STATS_API_BASE = "https://bombermanonlinerecomp.ndelpo318.workers.dev";
 const byId=(id)=>document.getElementById(id), numberFormat=new Intl.NumberFormat();
 const formatNumber=(v)=>v===null||v===undefined?"—":numberFormat.format(v);
 const safeDate=(v,withTime=true)=>{if(!v)return "—";const d=new Date(v);if(Number.isNaN(d.getTime()))return "—";return new Intl.DateTimeFormat(undefined,withTime?{dateStyle:"medium",timeStyle:"short"}:{dateStyle:"medium"}).format(d);};
