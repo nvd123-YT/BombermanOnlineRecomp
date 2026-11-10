@@ -128,8 +128,14 @@
       "in": "args",
       "choices": [
         {
-          "label": "Windowed",
+          "label": "Follow RecompLauncher mode",
           "args": []
+        },
+        {
+          "label": "Windowed",
+          "args": [
+            "--bmo-windowed"
+          ]
         },
         {
           "label": "Fullscreen",

@@ -71,8 +71,9 @@ associated `.bin` tracks). It starts the bundled native game directly without op
 standalone Electron interface.
 
 The RecompLauncher settings page exposes render scale (1x–8x), aspect ratio, VSync, window/fullscreen
-mode, FPS counter, audio, online play, and BBA/modem selection. Launching the app normally still
-opens the existing Bomberman launcher.
+mode, FPS counter, audio, online play, and BBA/modem selection. By default it follows RecompLauncher's
+mode (fullscreen in Big Picture, windowed on desktop); the display setting can override that. Launching
+the app normally still opens the existing Bomberman launcher.
 
 The current SDK does not have a Dreamcast-specific content check for CHD/GDI/CUE images, and the
 Redump multi-track record is not a CRC/size match for any one of those selected files. The profile
