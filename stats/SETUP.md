@@ -40,7 +40,7 @@ Deploy:
 npx wrangler deploy
 \`\`\`
 
-Wrangler prints a URL similar to \`https://bomberman-online-stats.<your-account-subdomain>.workers.dev\`. Test it:
+Wrangler prints a URL similar to \`https://bombermanonlinerecomp.<your-account-subdomain>.workers.dev\`. Test it:
 
 \`\`\`sh
 curl https://bomberman-online-stats.<your-account-subdomain>.workers.dev/health
