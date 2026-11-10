@@ -2,6 +2,11 @@ name = "bombermanonlinerecomp"
 main = "worker.js"
 compatibility_date = "2026-11-10"
 
+[observability.logs]
+enabled = true
+invocation_logs = true
+persist = true
+
 [triggers]
 crons = ["* * * * *"]
 
