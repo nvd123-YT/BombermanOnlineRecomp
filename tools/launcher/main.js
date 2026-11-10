@@ -1093,7 +1093,7 @@ function launchRecompLauncherGame() {
   }
 
   const gameArgs = ["--config", CONFIG, "--disc", disc, "--window"];
-  const options = { online: false, conn: "bba", dcnet: true, server: "", serverPort: "" };
+  const options = { online: false, conn: "bba", dcnet: true, server: "", serverPort: "", fullscreen: process.env.RECOMPLAUNCHER_MODE === "bigpicture" };
 
   // These names are deliberately app-specific so Chromium/Electron doesn't consume them.
   for (let i = gameIndex + 2; i < process.argv.length; i++) {
@@ -1113,7 +1113,10 @@ function launchRecompLauncherGame() {
         gameArgs.push("--sync-display");
         break;
       case "--bmo-fullscreen":
-        gameArgs.push("--fullscreen");
+        options.fullscreen = true;
+        break;
+      case "--bmo-windowed":
+        options.fullscreen = false;
         break;
       case "--bmo-fps":
         gameArgs.push("--fps");
@@ -1130,6 +1133,7 @@ function launchRecompLauncherGame() {
     }
   }
 
+  if (options.fullscreen) gameArgs.push("--fullscreen");
   if (fs.existsSync(BINDINGS_USER)) gameArgs.push("--bindings", BINDINGS_USER);
   try {
     fs.mkdirSync(path.dirname(VMU), { recursive: true });
