@@ -1065,15 +1065,8 @@ ipcMain.handle("win:close", () => win && win.close());
 // ---------------------------------------------------------------------------
 app.whenReady().then(() => {
   prepareWorkspace();
-  configureUpdater();
+  if (!app.isPackaged) setUpdaterState("development", { message: "Updates are available in packaged releases." });
   createWindow();
-  if (app.isPackaged && process.platform !== "darwin") {
-    setTimeout(() => {
-      autoUpdater.checkForUpdates().catch((error) => {
-        setUpdaterState("error", { message: error && error.message ? error.message : String(error) });
-      });
-    }, 2500);
-  }
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
