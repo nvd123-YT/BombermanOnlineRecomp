@@ -39,6 +39,16 @@ for (const name of ENTRIES) {
   console.log(`synced ${name}`);
 }
 
+// Bundle the repository's Bomberman Online logo with the installable launcher UI.
+const BRAND_LOGO_SRC = path.join(ROOT, "9462-1643360380.png");
+const BRAND_LOGO_DST = path.join(HERE, "ui", "bomberman-online-logo.png");
+if (!fs.existsSync(BRAND_LOGO_SRC)) {
+  throw new Error(`Launcher branding asset is missing: ${BRAND_LOGO_SRC}`);
+}
+fs.mkdirSync(path.dirname(BRAND_LOGO_DST), { recursive: true });
+fs.copyFileSync(BRAND_LOGO_SRC, BRAND_LOGO_DST);
+console.log("synced Bomberman Online logo");
+
 // A disc path remembered on this machine must not travel with the app.
 const local = path.join(HERE, "game", ".dreamcomp");
 fs.rmSync(local, { recursive: true, force: true });
