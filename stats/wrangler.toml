@@ -1,6 +1,8 @@
 name = "bombermanonlinerecomp"
 main = "worker.js"
 compatibility_date = "2026-11-10"
+
+# Preview builds use isolated settings; production bindings remain top-level.
 previews = {}
 
 [observability.logs]
