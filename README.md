@@ -47,7 +47,7 @@ The Electron launcher replaces the old Tk UI. Build and run it:
 
 ```sh
 cd tools/launcher
-npm ci
+npm install
 npm start                      # dev mode
 npm run selftest               # verify UI renders on all platforms
 npm run package                # electron-builder: .dmg/.zip (macOS), .exe/.zip (Windows), .AppImage/.deb/.tar.gz (Linux)
@@ -61,7 +61,7 @@ test, controller test, remap editor, streaming logs, and settings persistence.
 bundled native executable starts directly; the launcher does not run CMake, Ninja, Python, a
 compiler, or a local recompilation. The disc image is passed to the game for GD-ROM reads. The
 **Build** action is only for developer/source checkouts; packaged releases do not rebuild. User
-settings and VMU saves remain in the writable app-data workspace across application updates.
+settings and VMU saves remain in the writable app-data workspace across application updates. Windows NSIS and supported Linux AppImage/DEB installs check GitHub Releases for updates automatically; the status-bar update control downloads and installs them. macOS builds are currently unsigned, so the same control opens Releases for a manual DMG replacement. Update manifests and blockmaps are published alongside each package.
 
 ## Prebuilt release pipeline
 
