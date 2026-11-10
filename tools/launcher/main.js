@@ -9,6 +9,7 @@ const os = require("os");
 const net = require("net");
 const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
+const { autoUpdater } = require("electron-updater");
 
 // In dev mode the repository itself is the workspace. A packaged app must not build inside its own
 // bundle: Linux AppImages mount read-only, and Program Files / /Applications may not be writable.
@@ -168,6 +169,103 @@ function prepareWorkspace() {
 }
 
 let child = null;
+
+const RELEASES_URL = "https://github.com/nvd123-YT/BombermanOnlineRecomp/releases";
+let updaterState = {
+  state: "idle",
+  message: "Check for updates",
+  version: app.getVersion(),
+};
+let updaterBusy = false;
+
+function setUpdaterState(state, fields = {}) {
+  updaterState = { state, version: app.getVersion(), ...fields };
+  emit("update-status", updaterState);
+}
+
+function configureUpdater() {
+  if (!app.isPackaged) {
+    setUpdaterState("development", { message: "Updates are available in packaged releases." });
+    return;
+  }
+
+  // The distributed macOS builds are unsigned. Squirrel.Mac requires a signed application
+  // for automatic installation, so keep macOS updates as an explicit release-page download.
+  if (process.platform === "darwin") {
+    setUpdaterState("manual", { message: "Download the latest macOS build from Releases." });
+    return;
+  }
+
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.allowPrerelease = true;
+  autoUpdater.on("checking-for-update", () => {
+    setUpdaterState("checking", { message: "Checking for updates…" });
+  });
+  autoUpdater.on("update-available", (info) => {
+    setUpdaterState("available", {
+      message: `Version ${info.version} is available.`,
+      availableVersion: info.version,
+    });
+  });
+  autoUpdater.on("update-not-available", (info) => {
+    setUpdaterState("current", {
+      message: "You have the latest version.",
+      availableVersion: info && info.version,
+    });
+  });
+  autoUpdater.on("download-progress", (progress) => {
+    setUpdaterState("downloading", {
+      message: `Downloading update: ${Math.round(progress.percent)}%`,
+      percent: Math.round(progress.percent),
+      availableVersion: updaterState.availableVersion,
+    });
+  });
+  autoUpdater.on("update-downloaded", (info) => {
+    setUpdaterState("downloaded", {
+      message: `Version ${info.version} is ready to install.`,
+      availableVersion: info.version,
+    });
+  });
+  autoUpdater.on("error", (error) => {
+    setUpdaterState("error", {
+      message: error && error.message ? error.message : String(error),
+    });
+  });
+}
+
+async function performUpdateAction() {
+  if (process.platform === "darwin" || !app.isPackaged) {
+    await shell.openExternal(RELEASES_URL);
+    return { ok: true, manual: true };
+  }
+  if (updaterBusy) return { ok: false, error: "An update action is already running." };
+
+  try {
+    updaterBusy = true;
+    if (updaterState.state === "downloaded") {
+      if (child) return { ok: false, error: "Close the game before installing the launcher update." };
+      autoUpdater.quitAndInstall();
+      return { ok: true, installing: true };
+    }
+    if (updaterState.state === "available") {
+      setUpdaterState("downloading", {
+        message: "Downloading update…",
+        availableVersion: updaterState.availableVersion,
+        percent: 0,
+      });
+      await autoUpdater.downloadUpdate();
+      return { ok: true, downloading: true };
+    }
+    await autoUpdater.checkForUpdates();
+    return { ok: true, checking: true };
+  } catch (error) {
+    setUpdaterState("error", { message: error && error.message ? error.message : String(error) });
+    return { ok: false, error: String(error) };
+  } finally {
+    updaterBusy = false;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Toolchain
@@ -663,6 +761,7 @@ function stateSnapshot() {
   return {
     platform: process.platform,
     version: app.getVersion(),
+    updateState: updaterState,
     paths: { root: ROOT, exe: EXE, localJson: LOCAL_JSON, bindings: BINDINGS_USER },
     settings,
     discInfo,
@@ -677,6 +776,7 @@ function stateSnapshot() {
 }
 
 ipcMain.handle("state:get", () => stateSnapshot());
+ipcMain.handle("app:update-action", () => performUpdateAction());
 ipcMain.handle("settings:save", (_e, patch) => writeSettings(patch || {}));
 ipcMain.handle("disc:pick", async () => {
   const res = await dialog.showOpenDialog(win, {
@@ -796,7 +896,15 @@ ipcMain.handle("win:close", () => win && win.close());
 // ---------------------------------------------------------------------------
 app.whenReady().then(() => {
   prepareWorkspace();
+  configureUpdater();
   createWindow();
+  if (app.isPackaged && process.platform !== "darwin") {
+    setTimeout(() => {
+      autoUpdater.checkForUpdates().catch((error) => {
+        setUpdaterState("error", { message: error && error.message ? error.message : String(error) });
+      });
+    }, 2500);
+  }
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
