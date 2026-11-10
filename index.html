@@ -16,9 +16,7 @@ a{color:inherit}.wrap{width:min(1120px,calc(100% - 40px));margin:0 auto}.topbar{
 .button.secondary{background:var(--panel2);color:var(--text);box-shadow:none;border-color:var(--line)}
 .hero{padding:76px 0 44px;display:grid;grid-template-columns:1.35fr .65fr;align-items:center;gap:38px}.eyebrow{display:inline-flex;align-items:center;gap:8px;color:var(--yellow);font-size:10px;font-weight:900;letter-spacing:.16em;text-transform:uppercase}.eyebrow:before{content:"";width:18px;height:2px;background:currentColor}
 h1{font-size:clamp(42px,6vw,70px);line-height:.98;letter-spacing:-.065em;margin:18px 0}h1 em{color:var(--red);font-style:normal}.hero p{max-width:640px;color:var(--muted);font-size:15px;margin:0 0 24px}.hero-actions{display:flex;flex-wrap:wrap;gap:10px}
-.hero-art{min-height:235px;display:grid;place-items:center;position:relative}.bomb{position:relative;width:158px;height:158px;border-radius:43% 48% 46% 43%;background:radial-gradient(circle at 33% 25%,#626875 0,#353a46 25%,#171a21 68%);border:1px solid #ffffff30;box-shadow:inset -18px -19px 24px #0006,0 28px 70px #0006;transform:rotate(-13deg)}
-.bomb:before{content:"";position:absolute;width:38px;height:12px;border-radius:9px;background:#a5a8ad;top:-3px;right:28px;transform:rotate(-28deg)}.bomb:after{content:"";position:absolute;width:35px;height:56px;border-radius:50% 50% 40% 40%;top:-49px;right:17px;transform:rotate(18deg);background:radial-gradient(ellipse at 50% 80%,#fff4b0 0 12%,#ffad36 34%,#ff5144 67%,transparent 70%);filter:drop-shadow(0 0 17px #ff9135cc)}
-.spark{position:absolute;border-radius:50%;background:var(--yellow);box-shadow:0 0 22px #ff9f43}.spark.one{width:8px;height:8px;top:32px;right:25px}.spark.two{width:5px;height:5px;bottom:48px;left:18px}.spark.three{width:6px;height:6px;top:60px;left:47px}.hero-note{position:absolute;bottom:0;right:0;color:#777d8c;font-size:10px;font-weight:900;letter-spacing:.16em}
+.hero-art{min-height:235px;display:grid;place-items:center;position:relative}.hero-logo{display:block;width:min(100%,360px);max-height:230px;object-fit:contain;filter:drop-shadow(0 22px 34px #0008)}
 .section{padding:30px 0}.section-head{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:17px}.section-head h2{font-size:24px;margin:0;letter-spacing:-.04em}.section-head p{color:var(--muted);font-size:12px;margin:5px 0 0}
 .live-pill{display:inline-flex;align-items:center;gap:8px;font-size:10px;color:var(--muted);font-weight:900;letter-spacing:.04em;text-transform:uppercase}.dot{width:8px;height:8px;border-radius:50%;background:#777d8c}.dot.live{background:var(--green);box-shadow:0 0 0 4px #69d69b1f,0 0 16px #69d69b80}.dot.stale{background:var(--yellow)}.dot.error{background:var(--red)}
 .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.metric{background:linear-gradient(155deg,#20232dfa,#191b23fa);border:1px solid var(--line);border-radius:17px;padding:18px;min-height:121px}.metric.primary{border-color:#ff4b4573;background:linear-gradient(145deg,#ff4b4524,#191b23fa 66%)}
@@ -42,7 +40,7 @@ footer{border-top:1px solid #ffffff12;margin-top:48px;padding:25px 0 36px;color:
 <section class="wrap hero"><div><div class="eyebrow">Dreamcast classic · Back online</div><h1>The battle<br>never <em>ended.</em></h1>
 <p>Bomberman Online returns with a native PC recompilation and original online multiplayer through DCNet. See the community playing around the world.</p>
 <div class="hero-actions"><a class="button" href="#stats">View live player stats ↓</a><a class="button secondary" href="https://github.com/nvd123-YT/BombermanOnlineRecomp">Source code ↗</a></div></div>
-<div class="hero-art" aria-hidden="true"><div class="bomb"><i class="spark one"></i><i class="spark two"></i><i class="spark three"></i></div><div class="hero-note">READY · SET · BOOM</div></div></section>
+<div class="hero-art" aria-hidden="true"><img class="hero-logo" src="./9462-1643360380.png?v=3" alt="" width="360" height="230" decoding="async"></div></section>
 <section class="wrap section" id="stats">
 <div class="section-head"><div><h2>Bomberman Online activity</h2><p>DCNet players observed by the community stats collector.</p></div><div class="live-pill"><span id="statusDot" class="dot"></span><span id="statusText">Collector not connected</span></div></div>
 <div class="metrics">
@@ -63,7 +61,7 @@ footer{border-top:1px solid #ffffff12;margin-top:48px;padding:25px 0 36px;color:
 </div></section></main>
 <footer><div class="wrap footer-inner"><div>Bomberman Online Recompiled · Community statistics</div><div class="footer-links"><a href="https://github.com/nvd123-YT/BombermanOnlineRecomp">GitHub</a><a href="https://github.com/nvd123-YT/BombermanOnlineRecomp/releases">Releases</a><a href="https://recomplauncher.com/">RecompLauncher</a></div></div></footer>
 <script>
-const STATS_API_BASE = "4cdc2362-2739-4038-aa4d-bf83076fd598"; // Set to your deployed Cloudflare Worker URL.
+const STATS_API_BASE = ""; // Add the deployed Cloudflare Worker URL here after the collector is deployed.
 const byId=(id)=>document.getElementById(id), numberFormat=new Intl.NumberFormat();
 const formatNumber=(v)=>v===null||v===undefined?"—":numberFormat.format(v);
 const safeDate=(v,withTime=true)=>{if(!v)return "—";const d=new Date(v);if(Number.isNaN(d.getTime()))return "—";return new Intl.DateTimeFormat(undefined,withTime?{dateStyle:"medium",timeStyle:"short"}:{dateStyle:"medium"}).format(d);};
