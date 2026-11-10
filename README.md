@@ -129,3 +129,13 @@ online in the launcher and enter online mode in-game.
 - **No credentials, no Ghidra DBs**
 - **No push/publish without authorization**
 - Nightly releases are built automatically at 00:00 UTC; tag a commit with `v*` for a formal release
+
+## Community statistics homepage
+
+The repository root \`index.html\` is the **Bomberman Online Recompiled** homepage. GitHub Actions publishes it to GitHub Pages on pushes to \`main\`.
+
+The dashboard is Bomberman-only. Its Cloudflare Worker polls DCNet's public \`/status/api/players\` feed once per minute and accepts only the exact game ID \`bomberman\`. Cloudflare D1 stores pseudonymous player identities, daily activity, session estimates, and concurrent-player snapshots.
+
+**Statistics collection needs one-time Cloudflare setup.** Follow [\`stats/SETUP.md\`](stats/SETUP.md) to create the D1 database, set the private \`PLAYER_HASH_SECRET\`, deploy the Worker, and connect its URL in \`index.html\`. Until then, the homepage deliberately displays no fabricated counts.
+
+Raw usernames are not stored. Unique-player tracking begins when the collector is first deployed; DCNet's live feed does not provide historical records for earlier players. Polling once per minute can also miss very short sessions.
