@@ -35,7 +35,6 @@
         "nsis",
         "zip"
       ],
-      "nsis": { "runAfterFinish": false },
       "artifactName": "${productName}-${version}-win-${arch}.${ext}"
     },
     "linux": {
@@ -47,6 +46,7 @@
       "maintainer": "nvd123-YT <nvd123-yt@users.noreply.github.com>",
       "artifactName": "${productName}-${version}-linux-${arch}.${ext}"
     },
+    "nsis": { "runAfterFinish": false },
     "files": [
       "main.js",
       "preload.js",
