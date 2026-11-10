@@ -10,7 +10,11 @@
   "start": {
     "program": [
       "Bomberman Online Launcher.exe",
+      "Bomberman Online Launcher-win32-x64/Bomberman Online Launcher.exe",
+      "win-unpacked/Bomberman Online Launcher.exe",
       "Bomberman Online Launcher.app",
+      "mac-arm64/Bomberman Online Launcher.app",
+      "mac-x64/Bomberman Online Launcher.app",
       "Bomberman Online Launcher.AppImage"
     ],
     "args": [
