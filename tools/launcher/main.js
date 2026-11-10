@@ -383,16 +383,14 @@ async function performUpdateAction() {
         detail: "The launcher will close, install the update, and reopen. Your disc selection, settings, bindings, and VMU save are stored separately and will be kept.",
       });
       if (choice.response !== 0) {
+        fs.rmSync(tempDir, { recursive: true, force: true });
         setUpdaterState("available", {
-          message: "Update downloaded and verified. Click to install when ready.",
+          message: "Update is available. Click again when you are ready to install.",
           availableVersion: release.name || release.tag_name,
           releaseTag: release.tag_name,
           release,
         });
-        // Retain the verified package directory for the next click.
-        updaterState.downloadedPath = archivePath;
-        updaterState.tempDir = tempDir;
-        return { ok: true, downloaded: true };
+        return { ok: true, available: true };
       }
 
       const pid = String(process.pid);
