@@ -41,12 +41,19 @@ class Ta {
 public:
     void reset() noexcept;
     void feed(const std::uint32_t words[8]);
+    // Freeze the just-built list for rendering without copying it. The current builder storage is
+    // exchanged with the previously rendered list and is reused by the next TA_LIST_INIT.
+    void prepare_render() noexcept;
+    const std::vector<std::uint32_t>& rendered_stream() const noexcept { return rendered_stream_; }
+    void clear_rendered() noexcept { rendered_stream_.clear(); stream_swapped_ = false; }
     std::function<void(unsigned list)> on_list_end;
 
     std::array<ListStats, 5> lists{};
     std::uint64_t chunks = 0, invalid = 0;
     unsigned current_list = 7;          // 7: none open
-    std::vector<std::uint32_t> stream;  // raw parameter words since the last list init
+    std::vector<std::uint32_t> stream;  // current TA list builder
+    std::vector<std::uint32_t> rendered_stream_;  // last START_RENDER, retained for F11 / pause
+    bool stream_swapped_ = false;
 
     // Sizes from the parameter control word (Flycast TaTypeLut): a 64-byte polygon header is an
     // intensity-coloured textured polygon with offset colour, or an intensity two-volume polygon;
