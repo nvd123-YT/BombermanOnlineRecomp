@@ -2651,10 +2651,8 @@ int main(int argc, char** argv) {
     dream::aica::Aica aica(sys.sched, sys.holly, sys.memory);
     aica.mixer.soft_clip = &soft_clip;
     sys.memory.map_mmio(dream::aica::Aica::kRegBase, dream::aica::Aica::kRegEnd, &aica);
-    // ARM7 program-counter histogram sampled once per 44.1 kHz tick (where the driver spends its
-    // time), and the optional recording.
-    // A count per instruction slot of the 2 MB sound RAM (dreamcomp): a hash map here cost ~1 % of
-    // the game thread, at 44 100 updates a second.
+    // Optional ARM7 program-counter histogram (DREAM_AICA_PROFILE=1), sampled once per
+    // 44.1 kHz tick. Disabled in normal runs so diagnostic counting stays out of the audio path.
     const bool profile_arm_pcs = [] {
         const char* e = std::getenv("DREAM_AICA_PROFILE");
         return e && *e && *e != '0';
