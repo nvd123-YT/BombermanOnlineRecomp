@@ -2,6 +2,7 @@
 
 <p align="center">
   <a href="https://recompstore.com/dev/nvd123-yt"><img src="https://recompstore.com/assets/press/verified-dark.svg" alt="Verified developer on RecompStore"></a>
+  <img src="https://img.shields.io/badge/SEGA-Dreamcast-FF6600?style=for-the-badge&logo=sega&logoColor=white" alt="SEGA Dreamcast">
 </p>
 
 A native C/C++ recompilation of **Bomberman Online** (Sega Dreamcast, USA, MK-51065 V1.004),
