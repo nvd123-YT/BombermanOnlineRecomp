@@ -5,7 +5,14 @@
   "repo": "nvd123-YT/BombermanOnlineRecomp",
   "game": {
     "kind": "iso",
-    "label": "Your own USA Bomberman Online Dreamcast disc image (MK-51065 V1.004). Supported formats: .chd, .gdi, or .cue with its .bin tracks."
+    "label": "Your own USA Bomberman Online Dreamcast disc image (MK-51065 V1.004). Supported formats: .chd, .gdi, or .cue with its .bin tracks.",
+    "dumps": [
+      {
+        "name": "USA CUE sheet (descriptor only)",
+        "size": 360,
+        "crc32": "77e7cba3"
+      }
+    ]
   },
   "start": {
     "program": [
