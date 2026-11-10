@@ -569,6 +569,41 @@ function pollPads(now) {
   prevPad.set(pad.index, pad.buttons.map((b) => b.pressed));
 }
 
+function renderUpdateState(state) {
+  if (!state) return;
+  const btn = $("updateBtn");
+  const labels = {
+    idle: "Check for updates",
+    development: "Releases",
+    checking: "Checking…",
+    available: `Download ${state.availableVersion || "update"}`,
+    downloading: state.percent == null ? "Downloading…" : `Downloading ${state.percent}%`,
+    downloaded: "Restart to update",
+    current: "Up to date",
+    manual: "Download update",
+    error: "Retry update",
+  };
+  btn.textContent = labels[state.state] || "Check for updates";
+  btn.disabled = ["checking", "downloading"].includes(state.state);
+  btn.title = state.message || "";
+  btn.classList.toggle("update-ready", state.state === "available" || state.state === "downloaded");
+}
+
+async function updateAction() {
+  const btn = $("updateBtn");
+  btn.disabled = true;
+  try {
+    const result = await window.api.updateAction();
+    if (result && result.error) toast(result.error, "err");
+    else if (result && result.manual) toast("Open Releases to download and install the latest build.", "info");
+  } catch (error) {
+    toast(`Update check failed: ${error}`, "err");
+  } finally {
+    // The next updater event will put the button back into its correct state.
+    setTimeout(() => { if (btn.isConnected) btn.disabled = false; }, 1200);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Wiring
 // ---------------------------------------------------------------------------
@@ -580,6 +615,7 @@ function bindEvents() {
   $("buildBtn").addEventListener("click", build);
   $("stopBtn").addEventListener("click", stop);
   $("testNetBtn").addEventListener("click", testConnection);
+  $("updateBtn").addEventListener("click", updateAction);
 
   $("resPills").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-preset]");
@@ -689,6 +725,7 @@ function bindEvents() {
   window.api.onLog(({ stream, text }) => log(text, stream));
   window.api.onTask(({ running: isRunning, label }) => setRunning(isRunning, label));
   window.api.onToast(({ kind, text }) => toast(text, kind));
+  window.api.onUpdateStatus((state) => renderUpdateState(state));
 }
 
 // ---------------------------------------------------------------------------
@@ -711,6 +748,7 @@ async function init() {
   $("serverInput").value = S.server || "";
   $("serverPort").value = S.serverPort || "7655";
   $("statusRight").textContent = `launcher ${snapshot.version}`;
+  renderUpdateState(snapshot.updateState || { state: "idle" });
 
   bindEvents();
   refreshDerived();
@@ -753,11 +791,11 @@ window.__selftest = () => {
     "titlebar", "discDrop", "discName", "detectBtn", "playBtn", "headlessBtn",
     "buildBtn", "stopBtn", "resPills", "scaleRange", "aspectSel", "vsync",
     "fullscreen", "fps", "audio", "online", "connSel", "serverInput",
-    "testNetBtn", "remapBtn", "logpanel", "log", "statusLeft", "padChip",
+    "testNetBtn", "remapBtn", "updateBtn", "logpanel", "log", "statusLeft", "padChip",
   ];
   // These live in fixed regions and must be on screen without scrolling.
   const fixedIds = new Set([
-    "titlebar", "discDrop", "playBtn", "logpanel", "log", "statusLeft", "padChip",
+    "titlebar", "discDrop", "playBtn", "logpanel", "log", "statusLeft", "padChip", "updateBtn",
   ]);
   for (const id of ids) {
     const el = $(id);
