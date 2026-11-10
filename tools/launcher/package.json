@@ -13,7 +13,10 @@
     "start": "electron .",
     "selftest": "electron . --selftest",
     "sync": "node sync.js",
-    "package": "node sync.js && electron-builder"
+    "package": "node sync.js && electron-builder --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.12"
   },
   "devDependencies": {
     "electron": "^38.0.0",
@@ -56,6 +59,14 @@
       "CMakeLists.txt",
       "README.md",
       "LICENSE"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "nvd123-YT",
+        "repo": "BombermanOnlineRecomp",
+        "releaseType": "prerelease"
+      }
     ],
     "directories": {
       "output": "dist"
