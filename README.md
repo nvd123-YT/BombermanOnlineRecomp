@@ -1,5 +1,9 @@
 # Bomberman Online — native recompilation
 
+<p align="center">
+  <a href="https://recompstore.com/dev/nvd123-yt"><img src="https://recompstore.com/assets/press/verified-dark.svg" alt="Verified developer on RecompStore"></a>
+</p>
+
 A native C/C++ recompilation of **Bomberman Online** (Sega Dreamcast, USA, MK-51065 V1.004),
 built on [dreamcomp](https://github.com/phobos665/dream-recomp)-style static SH-4 recompilation,
 with working original online multiplayer via DCNet and a cross-platform Electron launcher.
