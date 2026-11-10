@@ -214,17 +214,31 @@ jobs:
 
       - name: Install launcher dependencies
         working-directory: tools/launcher
+        run: npm ci
+
+      - name: Embed release build identity
+        working-directory: tools/launcher
         shell: bash
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
+            TAG="$GITHUB_REF_NAME"
+            CHANNEL="stable"
+          elif [[ "$GITHUB_WORKFLOW" == *Nightly* ]]; then
+            TAG="nightly-$GITHUB_RUN_ID"
+            CHANNEL="nightly"
           else
-            VERSION="2.1.0-beta.${GITHUB_RUN_ID}"
+            TAG="prebuilt-$GITHUB_RUN_ID"
+            CHANNEL="prebuilt"
           fi
-          npm version "$VERSION" --no-git-tag-version --allow-same-version
-          # The updater dependency is pinned in package.json; refresh the lock before the clean install.
-          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-          npm ci --no-audit --no-fund
+          python - "$TAG" "$GITHUB_SHA" "$CHANNEL" <<'PY'
+          import json, sys
+          from pathlib import Path
+          Path("build-info.json").write_text(json.dumps({
+              "tag": sys.argv[1],
+              "commit": sys.argv[2],
+              "channel": sys.argv[3]
+          }, indent=2) + "\n")
+          PY
 
       - name: Run launcher UI selftest
         working-directory: tools/launcher
@@ -269,6 +283,16 @@ jobs:
           path: release-assets/
           merge-multiple: true
 
+      - name: Generate SHA-256 package manifest
+        shell: bash
+        run: |
+          cd release-assets
+          find . -maxdepth 1 -type f \\
+            \\( -name '*.dmg' -o -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.tar.gz' -o -name '*.zip' \\) \\
+            -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          test -s SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
@@ -278,7 +302,7 @@ jobs:
             release-assets/*.AppImage
             release-assets/*.deb
             release-assets/*.tar.gz
-            release-assets/*.zip
+            release-assets/*.zip\n            release-assets/SHA256SUMS.txt
             release-assets/*.yml
             release-assets/*.blockmap
           # Main pushes get a uniquely tagged pre-release; v* tags retain
