@@ -31,7 +31,7 @@ while IFS= read -r -d '' item; do
     CANDIDATE="$item"
     COUNT=$((COUNT + 1))
   fi
-done < <(/usr/bin/find "$EXTRACTED" -maxdepth 3 -type d -name '*.app' -print0)
+done < <(/usr/bin/find "$EXTRACTED" -type d -name '*.app' -prune -print0)
 
 if [ "$COUNT" -ne 1 ] || [ -z "$CANDIDATE" ]; then
   echo "Update ZIP must contain exactly one valid .app bundle." >&2
