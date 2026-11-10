@@ -45,6 +45,7 @@ Engine-level instruments (flags of the port executable, `--help`): `--suggest-co
 | `DREAM_NO_MIPMAPS=1` | Upload only the base level of mipmapped textures, to compare |
 | `DREAM_DUMP_MIPS=DIR` | Write every level of the first 64 mipmapped textures as PNGs |
 | `DREAM_PROFILE=1` | Host time per scheduler event and rendering after the report |
+| `DREAM_AICA_PROFILE=1` | Collect the ARM7 program-counter histogram on every audio sample (off by default) |
 | `DREAM_SINGLE_THREAD=1` | Guest and window events on one thread (upstream behaviour) |
 
 Report lines for performance: `pacing:` (real-time runs: frame-interval percentiles, frames over 20/33 ms, and per late frame the guest frame, textures decoded, pipelines made, render and decode ms) and `textures:` (total decode and upload time).
