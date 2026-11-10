@@ -27,13 +27,15 @@
       "target": [
         "dmg",
         "zip"
-      ]
+      ],
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
     },
     "win": {
       "target": [
         "nsis",
         "zip"
-      ]
+      ],
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
     },
     "linux": {
       "target": [
@@ -41,9 +43,9 @@
         "deb",
         "tar.gz"
       ],
-      "maintainer": "nvd123-YT <nvd123-yt@users.noreply.github.com>"
+      "maintainer": "nvd123-YT <nvd123-yt@users.noreply.github.com>",
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}"
     },
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "files": [
       "main.js",
       "preload.js",
