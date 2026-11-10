@@ -97,7 +97,7 @@ export default {
     const url=new URL(request.url);
     if(request.method==="OPTIONS")return new Response(null,{status:204,headers:{"access-control-allow-origin":"*","access-control-allow-methods":"GET, OPTIONS","access-control-allow-headers":"Content-Type"}});
     if(request.method!=="GET")return jsonResponse({ok:false,error:"Method not allowed."},405);
-    if(url.pathname==="/health")return jsonResponse({ok:true,service:"bomberman-online-stats",gameId:BOMBERMAN_GAME_ID});
+    if(url.pathname==="/health")return jsonResponse({ok:true,service:"bombermanonlinerecomp",gameId:BOMBERMAN_GAME_ID});
     if(url.pathname==="/api/stats"){try{return jsonResponse(await readStats(env));}catch(error){console.error("Stats API failed:",error);return jsonResponse({ok:false,error:"Statistics database is not ready. Check collector setup."},503);}}
     return jsonResponse({ok:false,error:"Not found."},404);
   }
