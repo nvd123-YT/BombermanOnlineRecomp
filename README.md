@@ -1,4 +1,8 @@
-# Bomberman Online — native recompilation
+<p align="center">
+  <img src="9462-1643360380.png" alt="Bomberman Online" width="440">
+</p>
+
+<h1 align="center">Bomberman Online — native recompilation</h1>
 
 <p align="center">
   <a href="https://recompstore.com/dev/nvd123-yt"><img src="https://recompstore.com/assets/press/verified-dark.svg" alt="Verified developer on RecompStore" height="28"></a>
