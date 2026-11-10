@@ -12,18 +12,17 @@ This Cloudflare Worker polls DCNet's public player feed once per minute and reco
 
 The collector uses a stable account ID if the feed provides one, otherwise \`loginName\` or \`name\`, to derive an HMAC-SHA-256 pseudonym. It never stores raw player names. Keep \`PLAYER_HASH_SECRET\` private and unchanged; rotating it makes previous identities appear new.
 
-## One-time Cloudflare setup
+## Remaining Cloudflare setup
 
-Install Node.js, then from this directory:
+The D1 database \`bomberman-online-stats\` has already been created, and its ID is already configured in \`wrangler.toml\`. **Do not create a second database or replace that ID.**
+
+Install Node.js if needed. From this directory, log in to Cloudflare:
 
 \`\`\`sh
 npx wrangler login
-npx wrangler d1 create bomberman-online-stats
 \`\`\`
 
-Copy the returned \`database_id\` into \`database_id\` in \`wrangler.toml\`.
-
-Initialize the remote database:
+Initialize the existing remote database:
 
 \`\`\`sh
 npx wrangler d1 execute bomberman-online-stats --remote --file=./schema.sql
