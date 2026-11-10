@@ -50,7 +50,31 @@ extra = [0x0C0F85AE,  # called 498 times in the first run
          0x0C24AF4A, 0x0C24AF4E, 0x0C24AF52, 0x0C24AF56, 0x0C24AF5A,
          0x0C24DB8A, 0x0C24EF6E, 0x0C24F30C, 0x0C24FD1C, 0x0C24FEC6,
          0x0C250112, 0x0C2515BA, 0x0C251614, 0x0C251654, 0x0C251658, 0x0C25165C,
-         0x0C251660, 0x0C251CC4, 0x0C251CCC, 0x0C255914, 0x0C266B6C]
+         0x0C251660, 0x0C251CC4, 0x0C251CCC, 0x0C255914, 0x0C266B6C,
+         # Reported by the runtime execution audit ("call targets discovery never reached"):
+         # the guest actually executed these addresses, so they are live code, not guesses.
+         # 0x0C09E5BC is the real entry of the jump-table dispatcher whose case targets
+         # 0x0C09E5EC/0x0C09E5F4 the runtime hit; the rest are entries/case labels no translated
+         # function covered (the runtime already resumes inside a translated function, so a hit
+         # here means the enclosing region was never discovered).
+         0x0C09E5BC, 0x0C09E5EC, 0x0C09E5F4,
+         0x0C0334A2, 0x0C0334AE, 0x0C0334B2, 0x0C0334BE, 0x0C0334C2, 0x0C0334CE,
+         0x0C050302, 0x0C07FEBA, 0x0C0B9534,
+         # Reported only by the longer runs (the 0x0C07F0xx path is entered later in the
+         # session): a function entered after a call, plus its tail.
+         0x0C021F4E, 0x0C07F030,
+         # The 0x8C... aliases the audit printed ("relocation source = dest") are the same
+         # physical address through the cached alias, not copies: the bytes match the image at
+         # the identical link address, and the runtime's own suggest-config lists them as
+         # [functions] extra seeds. These are live call targets discovery never reached.
+         0x0C05FBF0, 0x0C05FC50, 0x0C05FCAE, 0x0C05FCD0, 0x0C05FCF2, 0x0C05FD14,
+         0x0C05FD34, 0x0C05FE0E,
+         0x0C0F85D6, 0x0C133842, 0x0C133848, 0x0C133858, 0x0C133862, 0x0C145764,
+         0x0C23C7EC, 0x0C23C7F4, 0x0C23C7FC, 0x0C23C804, 0x0C23C80C, 0x0C23C814,
+         0x0C23C81C, 0x0C23C82C, 0x0C23C834, 0x0C23C83C, 0x0C23C844, 0x0C23C84C,
+         0x0C23C854, 0x0C23C85C,
+         0x0C275958, 0x0C2759A2, 0x0C275A34, 0x0C275A3E, 0x0C275A7A, 0x0C275AF2,
+         0x0C275B86, 0x0C275B96]
 
 # Regions the program copied out of the image and ran elsewhere (first 600-frame run). The
 # 0x8C000000/0x8C000100/0x8C000400/0x8C000600 group is the exception/interrupt entry area; the
