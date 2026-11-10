@@ -35,6 +35,7 @@
         "nsis",
         "zip"
       ],
+      "nsis": { "runAfterFinish": false },
       "artifactName": "${productName}-${version}-win-${arch}.${ext}"
     },
     "linux": {
