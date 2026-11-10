@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
   getState: () => ipcRenderer.invoke("state:get"),
+  updateAction: () => ipcRenderer.invoke("app:update-action"),
+  onUpdateStatus: (cb) => ipcRenderer.on("update-status", (_e, payload) => cb(payload)),
   saveSettings: (patch) => ipcRenderer.invoke("settings:save", patch),
   pickDisc: () => ipcRenderer.invoke("disc:pick"),
   detectDisc: () => ipcRenderer.invoke("disc:detect"),
