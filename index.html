@@ -17,6 +17,7 @@ a{color:inherit}.wrap{width:min(1120px,calc(100% - 40px));margin:0 auto}.topbar{
 .hero{padding:76px 0 44px;display:grid;grid-template-columns:1.35fr .65fr;align-items:center;gap:38px}.eyebrow{display:inline-flex;align-items:center;gap:8px;color:var(--yellow);font-size:10px;font-weight:900;letter-spacing:.16em;text-transform:uppercase}.eyebrow:before{content:"";width:18px;height:2px;background:currentColor}
 h1{font-size:clamp(42px,6vw,70px);line-height:.98;letter-spacing:-.065em;margin:18px 0}h1 em{color:var(--red);font-style:normal}.hero p{max-width:640px;color:var(--muted);font-size:15px;margin:0 0 24px}.hero-actions{display:flex;flex-wrap:wrap;gap:10px}
 .hero-art{min-height:235px;display:grid;place-items:center;position:relative}.hero-logo{display:block;width:min(100%,360px);max-height:230px;object-fit:contain;filter:drop-shadow(0 22px 34px #0008)}
+.ad-slot{margin-top:0;margin-bottom:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-height:90px;overflow:hidden}.ad-label{width:100%;text-align:center;color:#777d8c;font-size:9px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.ad-slot #container-11e872791299b828f02d7aa56eff4a5b{max-width:100%}
 .section{padding:30px 0}.section-head{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:17px}.section-head h2{font-size:24px;margin:0;letter-spacing:-.04em}.section-head p{color:var(--muted);font-size:12px;margin:5px 0 0}
 .live-pill{display:inline-flex;align-items:center;gap:8px;font-size:10px;color:var(--muted);font-weight:900;letter-spacing:.04em;text-transform:uppercase}.dot{width:8px;height:8px;border-radius:50%;background:#777d8c}.dot.live{background:var(--green);box-shadow:0 0 0 4px #69d69b1f,0 0 16px #69d69b80}.dot.stale{background:var(--yellow)}.dot.error{background:var(--red)}
 .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.metric{background:linear-gradient(155deg,#20232dfa,#191b23fa);border:1px solid var(--line);border-radius:17px;padding:18px;min-height:121px}.metric.primary{border-color:#ff4b4573;background:linear-gradient(145deg,#ff4b4524,#191b23fa 66%)}
@@ -31,7 +32,6 @@ footer{border-top:1px solid #ffffff12;margin-top:48px;padding:25px 0 36px;color:
 @media(max-width:820px){.hero{grid-template-columns:1fr .45fr;gap:10px;padding-top:54px}.metrics{grid-template-columns:repeat(2,1fr)}.content-grid{grid-template-columns:1fr}.hero-art{transform:scale(.8)}}
 @media(max-width:570px){.wrap{width:min(100% - 28px,1120px)}.nav{min-height:62px}.navlinks{gap:12px;font-size:10px}.navlinks a:first-child{display:none}.navlinks .button{padding:9px 10px}.hero{display:block;padding:46px 0 22px}.hero-art{display:none}.hero p{font-size:13px}.section{padding:23px 0}.section-head{align-items:start;flex-direction:column;gap:8px}.metric{padding:14px;min-height:108px}.metric-value{font-size:30px}.panel{padding:15px}.about{grid-template-columns:1fr}}
 </style>
-  <script data-cfasync="false" src="https://abscloud.org/1/39d8f5a77d985d1c03e00bdd198c1c58"></script>
 </head>
 <body>
 <header class="topbar"><div class="wrap nav">
@@ -43,6 +43,12 @@ footer{border-top:1px solid #ffffff12;margin-top:48px;padding:25px 0 36px;color:
 <p>Bomberman Online returns with a native PC, Mac, and Linux recompilation and original online multiplayer through DCNet. See the community playing around the world.</p>
 <div class="hero-actions"><a class="button" href="#stats">View live player stats ↓</a><a class="button secondary" href="https://github.com/nvd123-YT/BombermanOnlineRecomp">Source code ↗</a></div></div>
 <div class="hero-art" aria-hidden="true"><img class="hero-logo" src="./9462-1643360380.png?v=3" alt="" width="360" height="230" decoding="async"></div></section>
+
+<aside class="wrap ad-slot" aria-label="Advertisement">
+  <div class="ad-label">Advertisement</div>
+  <script async="async" data-cfasync="false" src="https://bauval.org/21/11e872791299b828f02d7aa56eff4a5b"></script>
+  <div id="container-11e872791299b828f02d7aa56eff4a5b"></div>
+</aside>
 <section class="wrap section" id="stats">
 <div class="section-head"><div><h2>Bomberman Online activity</h2><p>DCNet players observed by the community stats collector.</p></div><div class="live-pill"><span id="statusDot" class="dot"></span><span id="statusText">Player tracking inactive</span></div></div>
 <div class="metrics">
