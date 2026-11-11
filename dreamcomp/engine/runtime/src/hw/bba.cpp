@@ -793,12 +793,9 @@ void Bba::flush_pending_tx() {
             frame = std::move(pending_tx_.front());
             pending_tx_.pop_front();
         }
-        bool accepted = false;
-        {
-            std::lock_guard<std::mutex> net_lock(net_control_mutex_);
-            accepted = net_.send_frame(frame.data(), frame.size());
-        }
-        if (!accepted) {
+        // send_frame serializes its own queue against stop(); the lifecycle mutex here would
+        // let a reconnect's blocking connect stall the emulation thread.
+        if (!net_.send_frame(frame.data(), frame.size())) {
             std::lock_guard<std::mutex> lock(pending_tx_mutex_);
             pending_tx_.push_front(std::move(frame));
             return;
@@ -911,11 +908,9 @@ bool Bba::transmit_one(unsigned descriptor) {
         receive(frame.data(), frame.size());
     else {
         ensure_online();
-        bool accepted = false;
-        {
-            std::lock_guard<std::mutex> net_lock(net_control_mutex_);
-            accepted = net_.send_frame(frame.data(), frame.size());
-        }
+        // DcNetClient::send_frame is internally synchronized with stop(); do not take the
+        // lifecycle mutex here because the reconnect worker may be inside a blocking connect().
+        const bool accepted = net_.send_frame(frame.data(), frame.size());
         if (!accepted) {
             bool queued = false;
             {
