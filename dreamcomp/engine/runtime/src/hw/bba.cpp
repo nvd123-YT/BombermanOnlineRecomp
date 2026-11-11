@@ -780,8 +780,7 @@ void Bba::ensure_online() {
         reconnect_ready_ = true;
     }
     reconnect_cv_.notify_all();
-    std::printf("bba: DCNet connection requested; connecting in background
-");
+    std::printf("bba: DCNet connection requested; connecting in background\n");
 }
 
 void Bba::flush_pending_tx() {
@@ -868,12 +867,10 @@ void Bba::reconnect_main() {
         online_discovered_ = true;
         if (connected) {
             retry_delay = std::chrono::seconds(1);
-            std::printf("bba: DCNet connected at %s
-", net_.endpoint().c_str());
+            std::printf("bba: DCNet connected at %s\n", net_.endpoint().c_str());
         } else {
             const auto delay = retry_delay.count() == 0 ? 1 : retry_delay.count();
-            std::fprintf(stderr, "bba: DCNet connect/reconnect failed (%s); retrying in %lld s
-",
+            std::fprintf(stderr, "bba: DCNet connect/reconnect failed (%s); retrying in %lld s\n",
                          error.empty() ? "connection lost" : error.c_str(),
                          static_cast<long long>(delay));
             retry_delay = retry_delay.count() == 0 ? std::chrono::seconds(1)

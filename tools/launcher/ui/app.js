@@ -842,6 +842,23 @@ window.__selftest = () => {
     if (!visibleText.includes(phrase)) failures.push(`missing label text: ${phrase}`);
   }
 
+  // The preset table must map to the exact named 16:9 render targets.
+  const expectedTargets = {
+    "720p": [1280, 720], "1080p": [1920, 1080], "1440p": [2560, 1440],
+    "4k": [3840, 2160], "8k": [7680, 4320],
+  };
+  for (const [name, expected] of Object.entries(expectedTargets)) {
+    const preset = snapshot.presets[name];
+    if (!preset) {
+      failures.push(`missing resolution preset: ${name}`);
+      continue;
+    }
+    const wide = preset.aspect ? preset.aspect / (4 / 3) : 1;
+    const actual = [Math.round(640 * preset.scale * wide), Math.round(480 * preset.scale)];
+    if (actual[0] !== expected[0] || actual[1] !== expected[1])
+      failures.push(`${name} targets ${actual.join(" × ")}, expected ${expected.join(" × ")}`);
+  }
+
   const logRect = rects.log;
   if (logRect && logRect.y < window.innerHeight * 0.5) {
     failures.push("output log is not pinned to the lower half of the window");
