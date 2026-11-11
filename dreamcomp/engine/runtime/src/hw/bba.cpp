@@ -912,18 +912,14 @@ bool Bba::transmit_one(unsigned descriptor) {
         // lifecycle mutex here because the reconnect worker may be inside a blocking connect().
         const bool accepted = net_.send_frame(frame.data(), frame.size());
         if (!accepted) {
-            bool queued = false;
-            {
-                std::lock_guard<std::mutex> lock(pending_tx_mutex_);
-                if (pending_tx_.size() < 256) {
-                    pending_tx_.push_back(std::move(frame));
-                    queued = true;
-                } else {
-                    tx_dropped.fetch_add(1, std::memory_order_relaxed);
-                }
+            // The reconnect worker is the sole pending-frame flusher. Keeping all sends on that
+            // thread preserves Ethernet ordering and keeps this MMIO/guest path non-blocking.
+            std::lock_guard<std::mutex> lock(pending_tx_mutex_);
+            if (pending_tx_.size() < 256) {
+                pending_tx_.push_back(std::move(frame));
+            } else {
+                tx_dropped.fetch_add(1, std::memory_order_relaxed);
             }
-            if (queued)
-                flush_pending_tx();
         }
     }
 
