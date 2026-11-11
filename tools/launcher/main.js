@@ -1022,8 +1022,11 @@ function readSettings() {
   const legacyPresetScales = { "720p": 1.5, "1080p": 2.25, "1440p": 3, "4k": 4.5, "8k": 9 };
   const savedResolution = String(s.resolution).toLowerCase();
   if (Object.prototype.hasOwnProperty.call(legacyPresetScales, savedResolution)) {
+    // Old builds wrote the preset name alongside its old integer scale. The named standard
+    // resolution is authoritative now, including its 16:9 aspect requirement.
     s.resolution = savedResolution;
     s.scale = legacyPresetScales[savedResolution];
+    s.aspect = "wide";
   } else if (!PRESETS[s.resolution]) {
     // Values saved by the brief relabel-only build stay available as custom scales.
     const intermediateScales = { "960p": 2, "1920p": 4, "2880p": 6, "3840p": 8 };
