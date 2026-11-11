@@ -23,7 +23,7 @@ jobs:
       - name: Verify no game data committed
         run: |
           echo "Checking for copyrighted game data outside the vendored engine..."
-          if git ls-files | grep -v '^dreamcomp/' | grep -E '\.(chd|cue|gdi|cdi|iso|bin|PVR|AFS|DAT|vmu|vms|vmi|gzf|gpr|rep)$'; then
+          if git ls-files | grep -v '^dreamcomp/' | grep -iE '\.(chd|cue|gdi|cdi|iso|bin|PVR|AFS|DAT|vmu|vms|vmi|gzf|gpr|rep)$'; then
             echo "::error::Game data files found in the public repository."
             exit 1
           fi
