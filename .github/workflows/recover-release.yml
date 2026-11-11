@@ -26,6 +26,7 @@ jobs:
           import pathlib
           import time
           import urllib.request
+          import urllib.error
           import zipfile
 
           token = os.environ["GH_TOKEN"]
@@ -45,6 +46,30 @@ jobs:
           def open_url(url):
               request = urllib.request.Request(url, headers=headers)
               return urllib.request.urlopen(request, timeout=180)
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, message, response_headers, newurl):
+                  return None
+
+          github_opener = urllib.request.build_opener(NoRedirect)
+
+          def open_artifact_download(url):
+              request = urllib.request.Request(url, headers=headers)
+              try:
+                  return github_opener.open(request, timeout=180)
+              except urllib.error.HTTPError as response:
+                  if response.code not in (301, 302, 303, 307, 308):
+                      raise
+                  signed_url = response.headers.get("Location")
+                  if not signed_url:
+                      raise RuntimeError("GitHub artifact response had no signed download URL")
+                  response.close()
+                  # The signed Azure URL authenticates itself. Never forward the
+                  # GitHub bearer token to the artifact-storage host.
+                  return urllib.request.urlopen(
+                      urllib.request.Request(signed_url),
+                      timeout=180,
+                  )
 
           index_url = f"{api}/actions/runs/{run_id}/artifacts?per_page=100"
           with open_url(index_url) as response:
@@ -71,7 +96,7 @@ jobs:
                   try:
                       print(f"Downloading {name} (attempt {attempt}/5)")
                       digest = hashlib.sha256()
-                      with open_url(download_url) as response, archive.open("wb") as target:
+                      with open_artifact_download(download_url) as response, archive.open("wb") as target:
                           while True:
                               chunk = response.read(8 * 1024 * 1024)
                               if not chunk:
