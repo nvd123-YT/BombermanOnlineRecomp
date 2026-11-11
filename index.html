@@ -87,7 +87,10 @@ for(const p of players){const tr=document.createElement("tr"),vals=["BM-"+String
 async function loadStats(){if(!STATS_API_BASE){setStatus("stale","Player tracking inactive");byId("updatedText").textContent="Live player statistics will appear when community tracking is online.";return;}
 try{const res=await fetch(STATS_API_BASE.replace(/\/+$/,"")+"/api/stats",{cache:"no-store",headers:{Accept:"application/json"}});if(!res.ok)throw new Error("Statistics service returned HTTP "+res.status);const data=await res.json();if(!data||data.ok!==true)throw new Error("Invalid statistics response");
 byId("onlineCount").textContent=data.onlineNow===null?"—":formatNumber(data.onlineNow);byId("uniqueCount").textContent=formatNumber(data.uniquePlayers);byId("peakCount").textContent=formatNumber(data.peakConcurrent);byId("sessionCount").textContent=formatNumber(data.totalSessions);byId("todayCount").textContent=formatNumber(data.playersToday);byId("updatedText").textContent=data.lastUpdated?"Last successful collection: "+safeDate(data.lastUpdated):"The collector is waiting for its first successful sample.";
-setStatus(data.stale?"stale":"live",data.stale?"Stats delayed":"DCNet collector live");renderHistory(data.dailyActivity);renderPlayers(byId("activePlayers"),data.activePlayers,data.stale?"Latest player snapshot is delayed.":"Nobody is currently reported in Bomberman Online.",true);renderRecent(data.recentPlayers);
+const collectionWarning=!!data.lastCollectionError;
+setStatus(data.stale||collectionWarning?"stale":"live",data.stale?"Stats delayed":collectionWarning?"Collection warning":"DCNet collector live");
+if(collectionWarning){byId("updatedText").textContent+=" · "+data.lastCollectionError;}
+renderHistory(data.dailyActivity);renderPlayers(byId("activePlayers"),data.activePlayers,data.stale?"Latest player snapshot is delayed.":"Nobody is currently reported in Bomberman Online.",true);renderRecent(data.recentPlayers);
 }catch(error){setStatus("error","Statistics unavailable");byId("updatedText").textContent="Could not load live statistics. The collector may be offline.";console.error("Bomberman stats:",error);}}
 loadStats();if(STATS_API_BASE)window.setInterval(loadStats,30000);
 </script></body></html>
