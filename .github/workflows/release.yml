@@ -10,12 +10,10 @@ on:
     types: [published]
 
 concurrency:
-  # Recovery publishing uses an isolated slot so a stale runner cannot block it.
-  group: ${{ contains(github.event.head_commit.message || '', '[reuse-artifacts:43092142505]') && format('release-recovery-{0}', github.run_id) || format('release-{0}', github.ref) }}
+  group: release-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
-  actions: read
   contents: read
 
 jobs:
@@ -36,7 +34,7 @@ jobs:
           echo "OK: no game data committed."
 
   build-and-package:
-    if: ${{ !contains(github.event.head_commit.message || '', '[reuse-artifacts:43092142505]') }}
+    if: ${{ !contains(github.event.head_commit.message || '', '[recovery-publish-107]') }}
     name: Build and package prebuilt game
     needs: validate
     runs-on: ${{ matrix.os }}
@@ -278,201 +276,15 @@ jobs:
     # Main-branch builds also publish a pre-release so successful platform
     # packages are attached to a downloadable GitHub Release, not left only
     # as short-lived Actions artifacts. Version tags publish normal releases.
-    if: >-
-      ${{
-        always() &&
-        (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) &&
-        needs.validate.result == 'success' &&
-        (
-          needs.build-and-package.result == 'success' ||
-          contains(github.event.head_commit.message || '', '[reuse-artifacts:43092142505]')
-        )
-      }}
+    if: ${{ !contains(github.event.head_commit.message || '', '[recovery-publish-107]') && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     permissions:
-      actions: read
       contents: write
     steps:
-      - name: Download packages from this workflow run
-        if: ${{ !contains(github.event.head_commit.message || '', '[reuse-artifacts:43092142505]') }}
+      - name: Download prebuilt packages
         uses: actions/download-artifact@v4
         with:
           path: release-assets/
           merge-multiple: true
-
-      - name: Reuse previously uploaded platform packages
-        if: ${{ contains(github.event.head_commit.message || '', '[reuse-artifacts:43092142505]') }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SOURCE_RUN_ID: "43092142505"
-        shell: bash
-        run: |
-          python - <<'PY'
-          import hashlib
-          import json
-          import os
-          import pathlib
-          import time
-          import urllib.error
-          import urllib.request
-          import zipfile
-
-          token = os.environ["GH_TOKEN"]
-          repo = os.environ["GITHUB_REPOSITORY"]
-          run_id = os.environ["SOURCE_RUN_ID"]
-          headers = {
-              "Accept": "application/vnd.github+json",
-              "Authorization": f"Bearer {token}",
-              "X-GitHub-Api-Version": "2022-11-28",
-          }
-          api = f"https://api.github.com/repos/{repo}"
-          out_dir = pathlib.Path("release-assets")
-          temp_dir = pathlib.Path(os.environ["RUNNER_TEMP"]) / "bomberman-artifacts"
-          out_dir.mkdir(parents=True, exist_ok=True)
-          temp_dir.mkdir(parents=True, exist_ok=True)
-
-          def request_bytes(url):
-              request = urllib.request.Request(url, headers=headers)
-              with urllib.request.urlopen(request, timeout=120) as response:
-                  return response.read()
-
-          index_url = f"{api}/actions/runs/{run_id}/artifacts?per_page=100"
-          index = json.loads(request_bytes(index_url))
-          required = {
-              "bomberman-online-prebuilt-windows-latest",
-              "bomberman-online-prebuilt-macos-latest",
-              "bomberman-online-prebuilt-ubuntu-latest",
-          }
-          artifacts = [a for a in index.get("artifacts", []) if a.get("name") in required]
-          valid = {a["name"] for a in artifacts if not a.get("expired", True)}
-          if valid != required:
-              raise SystemExit(f"Expected three unexpired platform artifacts; found {sorted(valid)}")
-
-          for artifact in artifacts:
-              name = artifact["name"]
-              archive = temp_dir / f"{name}.zip"
-              expected_digest = artifact.get("digest") or ""
-              url = artifact["archive_download_url"]
-              success = False
-              for attempt in range(1, 6):
-                  try:
-                      print(f"Downloading {name}, attempt {attempt}/5")
-                      digest = hashlib.sha256()
-                      request = urllib.request.Request(url, headers=headers)
-                      with urllib.request.urlopen(request, timeout=180) as response, archive.open("wb") as target:
-                          while True:
-                              chunk = response.read(8 * 1024 * 1024)
-                              if not chunk:
-                                  break
-                              target.write(chunk)
-                              digest.update(chunk)
-                      actual_digest = "sha256:" + digest.hexdigest()
-                      if expected_digest and actual_digest != expected_digest:
-                          raise ValueError(f"SHA-256 mismatch: expected {expected_digest}, got {actual_digest}")
-                      with zipfile.ZipFile(archive) as bundle:
-                          bad_member = bundle.testzip()
-                          if bad_member:
-                              raise ValueError(f"Corrupt ZIP member: {bad_member}")
-                          root = out_dir.resolve()
-                          for member in bundle.infolist():
-                              destination = (out_dir / member.filename).resolve()
-                              if not destination.is_relative_to(root):
-                                  raise ValueError(f"Unsafe ZIP path: {member.filename}")
-                          bundle.extractall(out_dir)
-                      success = True
-                      print(f"Verified and extracted {name} ({archive.stat().st_size} bytes)")
-                      break
-                  except Exception as exc:
-                      archive.unlink(missing_ok=True)
-                      print(f"::warning::Attempt {attempt} failed for {name}: {exc}")
-                      if attempt < 5:
-                          time.sleep(attempt * 5)
-              if not success:
-                  raise SystemExit(f"Could not download and verify {name} after five attempts")
-
-          packages = [
-              item for item in out_dir.iterdir()
-              if item.is_file() and item.name.endswith((".dmg", ".exe", ".AppImage", ".deb", ".tar.gz", ".zip"))
-          ]
-          if not packages:
-              raise SystemExit("Artifact ZIPs contained no release packages")
-          print("Recovered packages:")
-          for item in sorted(packages):
-              print(f"  {item.name}: {item.stat().st_size} bytes")
-
-      - name: Generate SHA-256 package manifest
-        shell: bash
-        run: |
-          cd release-assets
-          python - <<'PY'
-          from pathlib import Path
-          import hashlib
-          suffixes = (".dmg", ".exe", ".AppImage", ".deb", ".tar.gz", ".zip")
-          lines = []
-          for item in sorted(Path(".").iterdir()):
-              if item.is_file() and item.name.endswith(suffixes):
-                  digest = hashlib.sha256(item.read_bytes()).hexdigest()
-                  lines.append(f"{digest}  {item.name}")
-          if not lines:
-              raise SystemExit("No platform packages were downloaded.")
-          Path("SHA256SUMS.txt").write_text("\n".join(lines) + "\n")
-          PY
-          test -s SHA256SUMS.txt
-          cat SHA256SUMS.txt
-
-      - name: Publish release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            release-assets/*.dmg
-            release-assets/*.exe
-            release-assets/*.AppImage
-            release-assets/*.deb
-            release-assets/*.tar.gz
-            release-assets/*.zip
-            release-assets/SHA256SUMS.txt
-          # Main pushes get a uniquely tagged pre-release; v* tags retain
-          # their normal versioned release behavior.
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('prebuilt-{0}', github.run_id) }}
-          name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('Prebuilt build {0}', github.run_number) }}
-          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
-          draft: false
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-\t' read -r artifact_id artifact_name expected_digest; do
-            archive="$RUNNER_TEMP/bomberman-artifacts/$artifact_name.zip"
-            url="$api/actions/artifacts/$artifact_id/zip"
-            downloaded=false
-            for attempt in 1 2 3 4 5; do
-              rm -f "$archive"
-              echo "Downloading $artifact_name (attempt $attempt/5)..."
-              if curl --fail --silent --show-error --location \
-                --retry 4 --retry-all-errors --retry-delay 5 \
-                --connect-timeout 30 --max-time 1200 \
-                -H "Accept: application/vnd.github+json" \
-                -H "Authorization: Bearer $GH_TOKEN" \
-                "$url" -o "$archive" && [ -s "$archive" ]; then
-                actual_digest="sha256:$(sha256sum "$archive" | awk '{print $1}')"
-                if [ "$actual_digest" = "$expected_digest" ] && unzip -tq "$archive" >/dev/null; then
-                  downloaded=true
-                  break
-                fi
-                echo "::warning::Archive validation failed for $artifact_name (expected $expected_digest, got $actual_digest)."
-              else
-                echo "::warning::Archive download request failed for $artifact_name."
-              fi
-              sleep $((attempt * 5))
-            done
-            if [ "$downloaded" != true ]; then
-              echo "::error::Could not download and validate $artifact_name after retries."
-              exit 1
-            fi
-            mkdir -p "release-assets/$artifact_name"
-            unzip -q "$archive" -d "release-assets/$artifact_name"
-            rm -f "$archive"
-          done < "$RUNNER_TEMP/bomberman-artifacts/list.tsv"
-
-          find release-assets -type f -maxdepth 3 -printf '%p %s bytes\n' | sort
 
       - name: Generate SHA-256 package manifest
         shell: bash
