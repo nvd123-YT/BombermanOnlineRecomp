@@ -351,6 +351,7 @@ function applyCapture(value, device) {
   // bindings in the gamepad section, but allow either to be written where the
   // user asked so unusual setups still work.
   capturing.line.value = value;
+  capturing.line.raw = `${capturing.line.key} = ${value}`;
   capturing.valueEl.textContent = value;
   log(`bound ${capturing.line.key} = ${value} (${device})`, "meta");
   stopCapture();
