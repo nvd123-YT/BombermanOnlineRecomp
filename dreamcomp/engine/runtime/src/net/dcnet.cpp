@@ -133,13 +133,16 @@ DcNetClient::~DcNetClient() { stop(); }
 bool DcNetClient::start(const std::string& host, std::uint16_t port, Mode mode, std::string& error) {
     if (running_.load())
         return true;
+    // Establish the endpoint label before the first connection attempt, including failed ones.
+    // BBA reconnects reuse this host, so report readers never race a string rewrite later.
+    if (endpoint_.empty())
+        endpoint_ = host + ":" + std::to_string(port);
     const NativeSocket sock = connect_tcp(host, port, error);
     if (sock == kInvalidSocket)
         return false;
 
     socket_ = static_cast<Socket>(sock);
-    mode_ = mode;
-    endpoint_ = host + ":" + std::to_string(port);
+    mode_.store(mode, std::memory_order_release);
     stop_.store(false);
     connected_.store(true);
     running_.store(true);
@@ -195,23 +198,30 @@ void DcNetClient::fail() {
     shutdown_socket(static_cast<NativeSocket>(socket_));
 }
 
-void DcNetClient::send_frame(const std::uint8_t* frame, std::size_t size) {
-    if (!running_.load() || mode_ != Mode::Ethernet || frame == nullptr || size == 0 || size > kMaxFrame)
-        return;
+bool DcNetClient::send_frame(const std::uint8_t* frame, std::size_t size) {
+    if (frame == nullptr || size == 0 || size > kMaxFrame)
+        return false;
     {
         std::lock_guard<std::mutex> lock(tx_mutex_);
+        // Recheck while holding the queue lock so stop() cannot race an enqueue.
+        if (!running_.load(std::memory_order_acquire) ||
+            !connected_.load(std::memory_order_acquire) ||
+            mode_.load(std::memory_order_acquire) != Mode::Ethernet)
+            return false;
         tx_.push_back(static_cast<std::uint8_t>(size & 0xFF));
         tx_.push_back(static_cast<std::uint8_t>((size >> 8) & 0xFF));
         tx_.insert(tx_.end(), frame, frame + size);
     }
     tx_cv_.notify_one();
+    return true;
 }
 
 void DcNetClient::send_byte(std::uint8_t b) {
-    if (!running_.load() || mode_ != Mode::Ppp)
-        return;
     {
         std::lock_guard<std::mutex> lock(tx_mutex_);
+        if (!running_.load(std::memory_order_acquire) ||
+            mode_.load(std::memory_order_acquire) != Mode::Ppp)
+            return;
         tx_.push_back(b);
     }
     tx_cv_.notify_one();
@@ -254,7 +264,7 @@ void DcNetClient::reader_main() {
         if (n <= 0)
             break;
         std::lock_guard<std::mutex> lock(rx_mutex_);
-        if (mode_ == Mode::Ppp) {
+        if (mode_.load(std::memory_order_acquire) == Mode::Ppp) {
             if (byte_handler_) {
                 for (int i = 0; i < n; ++i) byte_handler_(buffer[static_cast<std::size_t>(i)]);
             }

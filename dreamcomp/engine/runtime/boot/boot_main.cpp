@@ -317,8 +317,8 @@ struct Live {
     // changes at run time).
     void target_size(float render_aspect, std::uint32_t& w, std::uint32_t& h) const {
         const float wide = render_aspect > 0.0f ? render_aspect / (4.0f / 3.0f) : 1.0f;
-        w = static_cast<std::uint32_t>(static_cast<float>(kGuestWidth * scale_) * wide + 0.5f);
-        h = kGuestHeight * scale_;
+        w = static_cast<std::uint32_t>(static_cast<float>(kGuestWidth) * scale_ * wide + 0.5f);
+        h = static_cast<std::uint32_t>(static_cast<float>(kGuestHeight) * scale_ + 0.5f);
     }
 
     // Rebuilds the render target(s) at a new shape (dreamcomp; Expanded aspect follows the
@@ -363,17 +363,13 @@ struct Live {
                     static_cast<double>(render_aspect_));
     }
 
-    bool start(unsigned scale, bool validation, const std::string& title,
+    bool start(float scale, bool validation, const std::string& title,
                float render_aspect = 0.0f, bool fullscreen = false) {
         scale_ = scale;
         render_aspect_ = want_render_aspect = render_aspect;
-        // --render-aspect (dreamcomp): an anamorphic widescreen title still addresses a 640x480
-        // screen, but its view is squeezed horizontally; drawing it into a target that is wider
-        // by the same factor keeps the horizontal resolution of a native wide render.
-        const float wide = render_aspect > 0.0f ? render_aspect / (4.0f / 3.0f) : 1.0f;
-        const std::uint32_t w =
-            static_cast<std::uint32_t>(static_cast<float>(kGuestWidth * scale) * wide + 0.5f);
-        const std::uint32_t h = kGuestHeight * scale;
+        // Startup uses the same dimension calculation as live aspect/scale changes.
+        std::uint32_t w = 0, h = 0;
+        target_size(render_aspect_, w, h);
         const std::uint32_t win_w = static_cast<std::uint32_t>(720.0f * (render_aspect > 0.0f ? render_aspect : 4.0f / 3.0f));
         if (!window.create(title.c_str(), win_w, 720, validation)) {
             error = window.error();
@@ -1082,7 +1078,7 @@ struct Live {
     dream::render::vk::Offscreen offscreen;
     // Geometry interpolation (dreamcomp, docs/INTERPOLATION.md): --interpolate.
     bool interpolate = false, pace_interpolation = true, have_prev = false, interp_ready = false;
-    unsigned scale_ = 1;
+    float scale_ = 1.0f;
     float render_aspect_ = 0.0f, want_render_aspect = 0.0f;
     unsigned want_scale = 0;  // dreamcomp: a scale asked for at run time, 0: none
     bool await_render = false;
@@ -1221,10 +1217,12 @@ std::string report_text(dream::System& sys, dream::hle::Bios& bios, const dream:
         const char* state = !bba->online_started()
                                 ? "idle"
                                 : (bba->online_connected() ? "online, connected" : "online, disconnected");
-        std::snprintf(buf, sizeof buf, "BBA: %llu frames in, %llu frames out, %llu dropped, %s\n",
+        std::snprintf(buf, sizeof buf,
+                      "BBA: %llu frames in, %llu frames out, %llu RX dropped, %llu TX dropped, %s\n",
                       static_cast<unsigned long long>(bba->rx_frames),
                       static_cast<unsigned long long>(bba->tx_frames),
-                      static_cast<unsigned long long>(bba->rx_dropped.load()), state);
+                      static_cast<unsigned long long>(bba->rx_dropped.load()),
+                      static_cast<unsigned long long>(bba->tx_dropped.load()), state);
         s += buf;
     }
     std::snprintf(
@@ -1561,7 +1559,7 @@ void usage(const char* argv0, std::FILE* out) {
         "\n"
         "Playing:\n"
         "  --window               open a window and play; implies sound\n"
-        "  --scale N              draw at N times the guest's 640x480 (1 to 8, default 1)\n"
+        "  --scale N              draw at N times 640x480 (1 to 9; fractional values supported)\n"
         "  --render-aspect A      render target shape for anamorphic widescreen (e.g. 1.7778)\n"
         "  --fullscreen           start fullscreen (Alt+Enter toggles)\n"
         "  --interpolate          draw a blended frame between two game frames (needs a display\n"
@@ -1778,7 +1776,7 @@ int main(int argc, char** argv) {
     std::string suggest_config;
     std::set<std::uint64_t> screenshot_at;  // --screenshot-at N[,N...] (list: dreamcomp)
     std::uint64_t capture_at = 0;
-    unsigned scale = 1;
+    float scale = 1.0f;
     // --texture-pack DIR / --dump-textures DIR (dreamcomp): replacement packs and the dump that
     // authors them, both keyed by the content hash in render/texture_pack.h.
     std::string texture_pack, dump_textures;
@@ -1953,7 +1951,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--sync-display"))
             sync_display = true;
         else if (!std::strcmp(argv[i], "--scale") && i + 1 < argc)
-            scale = static_cast<unsigned>(std::strtoul(argv[++i], nullptr, 0));
+            scale = std::strtof(argv[++i], nullptr);
         else if (!std::strcmp(argv[i], "--help") || !std::strcmp(argv[i], "-h")) {
             usage(argv[0], stdout);
             return 0;
@@ -1975,8 +1973,8 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "--config is required\n");
         return 2;
     }
-    if (scale < 1 || scale > 8) {
-        std::fprintf(stderr, "--scale must be 1 to 8\n");
+    if (!std::isfinite(scale) || scale < 1.0f || scale > 9.0f) {
+        std::fprintf(stderr, "--scale must be between 1 and 9 (fractional values supported)\n");
         return 2;
     }
 #ifndef DREAM_WITH_RENDERER

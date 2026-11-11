@@ -1,0 +1,21 @@
+# Root-level entry for Cloudflare Workers Builds when its working directory is the repository root.
+# Keep bindings and preview settings in sync with stats/wrangler.toml.
+name = "bombermanonlinerecomp"
+main = "stats/worker.js"
+compatibility_date = "2026-11-10"
+
+# Required by "npx wrangler preview"; preview resources remain isolated from production.
+previews = {}
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+persist = true
+
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "bomberman-online-stats"
+database_id = "4cdc2362-2739-4038-aa4d-bf83076fd598"

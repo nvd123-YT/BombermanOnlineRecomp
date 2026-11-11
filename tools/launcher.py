@@ -73,11 +73,11 @@ DISC_TYPES = [
 # name, key, scale, render aspect
 RESOLUTION_PRESETS = [
     ("Native 640x480", "native", 1, None),
-    ("720p  ~1280x720", "720p", 2, 1.7778),
-    ("1080p ~1920x1080", "1080p", 3, 1.7778),
-    ("1440p ~2560x1440", "1440p", 4, 1.7778),
-    ("4K    ~3840x2160", "4k", 6, 1.7778),
-    ("8K    ~7680x4320", "8k", 8, 1.7778),
+    ("720p  1280x720", "720p", 1.5, 1.7778),
+    ("1080p 1920x1080", "1080p", 2.25, 1.7778),
+    ("1440p 2560x1440", "1440p", 3, 1.7778),
+    ("4K    3840x2160", "4k", 4.5, 1.7778),
+    ("8K    7680x4320", "8k", 9, 1.7778),
 ]
 PRESET_BY_KEY = {p[1]: p for p in RESOLUTION_PRESETS}
 PRESET_BY_NAME = {p[0]: p for p in RESOLUTION_PRESETS}

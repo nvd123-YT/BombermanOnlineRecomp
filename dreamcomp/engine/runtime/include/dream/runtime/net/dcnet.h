@@ -44,7 +44,7 @@ public:
     const std::string& endpoint() const noexcept { return endpoint_; }
 
     // Queues one frame for transmission (Ethernet mode only). Never blocks.
-    void send_frame(const std::uint8_t* frame, std::size_t size);
+    bool send_frame(const std::uint8_t* frame, std::size_t size);
     // Queues one byte (Ppp mode only). Never blocks.
     void send_byte(std::uint8_t b);
 
@@ -67,7 +67,7 @@ private:
     void fail();
 
     Socket socket_ = -1;
-    Mode mode_ = Mode::Ethernet;
+    std::atomic<Mode> mode_{Mode::Ethernet};
     std::string endpoint_;
     bool verbose_ = false;
 

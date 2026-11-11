@@ -91,12 +91,14 @@ function presetForScale(scale) {
 
 function refreshDerived() {
   // Render output readout.
-  const scale = clamp(Number(S.scale) || 1, 1, 8);
-  const width = 640 * scale;
-  const height = S.aspect === "wide" ? Math.round(width / (16 / 9)) : 480 * scale;
+  const scale = clamp(Number(S.scale) || 1, 1, 9);
+  const wide = S.aspect === "wide" ? (16 / 9) / (4 / 3) : 1;
+  const width = Math.round(640 * scale * wide);
+  const height = Math.round(480 * scale);
   $("renderOut").textContent = `${width} × ${height}`;
-  $("scaleVal").textContent = `${scale}×`;
-  const pct = ((scale - 1) / 7) * 100;
+  const scaleText = Number.isInteger(scale) ? String(scale) : String(Number(scale.toFixed(2)));
+  $("scaleVal").textContent = `${scaleText}×`;
+  const pct = ((scale - 1) / 8) * 100;
   $("scaleRange").style.setProperty("--fill", `${pct}%`);
 
   // Preset pills.
@@ -580,15 +582,22 @@ function renderUpdateState(state) {
     development: "Releases",
     checking: "Checking…",
     available: `Download ${state.availableVersion || "update"}`,
-    downloading: state.percent == null ? "Downloading…" : `Downloading ${state.percent}%`,
+    downloading: state.stage === "checksum"
+      ? "Downloading checksum…"
+      : state.percent == null ? "Downloading…" : `Downloading ${state.percent}%`,
+    verifying: "Verifying…",
     installing: "Installing…",
     current: "Up to date",
     manual: "Download update",
     error: "Retry update",
   };
   btn.textContent = labels[state.state] || "Check for updates";
-  btn.disabled = ["checking", "downloading", "installing"].includes(state.state);
-  btn.title = state.message || "";
+  btn.disabled = ["checking", "downloading", "verifying", "installing"].includes(state.state);
+  const mb = (bytes) => (Number(bytes || 0) / (1024 * 1024)).toFixed(1);
+  const progressDetail = state.stage === "package" && state.downloadedBytes != null
+    ? ` ${mb(state.downloadedBytes)} / ${mb(state.totalBytes)} MiB`
+    : "";
+  btn.title = (state.message || "") + progressDetail;
   btn.classList.toggle("update-ready", state.state === "available");
 }
 
@@ -603,7 +612,7 @@ async function updateAction() {
     toast(`Update check failed: ${error}`, "err");
   } finally {
     // Keep the button disabled only while the updater is actively working.
-    if (btn.isConnected) btn.disabled = ["checking", "downloading", "installing"].includes(updateStatus.state);
+    if (btn.isConnected) btn.disabled = ["checking", "downloading", "verifying", "installing"].includes(updateStatus.state);
   }
 }
 
@@ -634,7 +643,7 @@ function bindEvents() {
   });
 
   $("scaleRange").addEventListener("input", () => {
-    S.scale = clamp(Number($("scaleRange").value) || 1, 1, 8);
+    S.scale = clamp(Number($("scaleRange").value) || 1, 1, 9);
     S.resolution = presetForScale(S.scale) || "native";
     refreshDerived();
     save();
@@ -740,7 +749,7 @@ async function init() {
   document.body.classList.toggle("mac", snapshot.platform === "darwin");
 
   // Seed controls from settings.
-  $("scaleRange").value = String(clamp(Number(S.scale) || 1, 1, 8));
+  $("scaleRange").value = String(clamp(Number(S.scale) || 1, 1, 9));
   $("aspectSel").value = S.aspect === "wide" ? "wide" : "native";
   $("vsync").checked = !!S.vsync;
   $("fullscreen").checked = !!S.fullscreen;
@@ -831,6 +840,23 @@ window.__selftest = () => {
   for (const phrase of ["resolution preset", "render scale", "aspect ratio",
                         "connection type", "dcnet server", "remap controls"]) {
     if (!visibleText.includes(phrase)) failures.push(`missing label text: ${phrase}`);
+  }
+
+  // The preset table must map to the exact named 16:9 render targets.
+  const expectedTargets = {
+    "720p": [1280, 720], "1080p": [1920, 1080], "1440p": [2560, 1440],
+    "4k": [3840, 2160], "8k": [7680, 4320],
+  };
+  for (const [name, expected] of Object.entries(expectedTargets)) {
+    const preset = snapshot.presets[name];
+    if (!preset) {
+      failures.push(`missing resolution preset: ${name}`);
+      continue;
+    }
+    const wide = preset.aspect ? preset.aspect / (4 / 3) : 1;
+    const actual = [Math.round(640 * preset.scale * wide), Math.round(480 * preset.scale)];
+    if (actual[0] !== expected[0] || actual[1] !== expected[1])
+      failures.push(`${name} targets ${actual.join(" × ")}, expected ${expected.join(" × ")}`);
   }
 
   const logRect = rects.log;

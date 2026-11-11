@@ -58,11 +58,11 @@ const DEFAULTS = {
 
 const PRESETS = {
   native: { scale: 1, aspect: null, label: "Native" },
-  "720p": { scale: 2, aspect: 16 / 9, label: "720p" },
-  "1080p": { scale: 3, aspect: 16 / 9, label: "1080p" },
-  "1440p": { scale: 4, aspect: 16 / 9, label: "1440p" },
-  "4k": { scale: 6, aspect: 16 / 9, label: "4K" },
-  "8k": { scale: 8, aspect: 16 / 9, label: "8K" },
+  "720p": { scale: 1.5, aspect: 16 / 9, label: "720p" },
+  "1080p": { scale: 2.25, aspect: 16 / 9, label: "1080p" },
+  "1440p": { scale: 3, aspect: 16 / 9, label: "1440p" },
+  "4k": { scale: 4.5, aspect: 16 / 9, label: "4K" },
+  "8k": { scale: 9, aspect: 16 / 9, label: "8K" },
 };
 
 
@@ -231,39 +231,75 @@ function httpsBuffer(url, redirects = 0) {
   });
 }
 
-function downloadUpdateAsset(url, destination, redirects = 0) {
+function downloadUpdateAsset(url, destination, options = {}, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > 6) return reject(new Error("Too many redirects while downloading the update."));
     const target = new URL(url);
+    let output = null;
+    let response = null;
+    let settled = false;
+
+    const removePartial = () => {
+      try { fs.rmSync(destination, { force: true }); } catch {}
+    };
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      if (response && output) response.unpipe(output);
+      if (output && !output.closed) {
+        output.once("close", removePartial);
+        output.destroy();
+      } else {
+        removePartial();
+      }
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+
     const req = require("https").get(target, {
       headers: { "User-Agent": "BombermanOnlineLauncher-Updater/1.0" },
     }, (res) => {
+      response = res;
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();
-        downloadUpdateAsset(new URL(res.headers.location, target).toString(), destination, redirects + 1)
+        downloadUpdateAsset(new URL(res.headers.location, target).toString(), destination, options, redirects + 1)
           .then(resolve, reject);
         return;
       }
       if (res.statusCode !== 200) {
         res.resume();
-        reject(new Error(`Update download failed with HTTP ${res.statusCode || "unknown"}.`));
+        fail(new Error(`Update download failed with HTTP ${res.statusCode || "unknown"}.`));
         return;
       }
-      const output = fs.createWriteStream(destination, { flags: "wx" });
+
+      const headerBytes = Number(res.headers["content-length"]) || 0;
+      const totalBytes = headerBytes || Number(options.expectedBytes) || 0;
+      let receivedBytes = 0;
+      output = fs.createWriteStream(destination, { flags: "wx" });
+      output.on("error", fail);
+      res.on("data", (chunk) => {
+        receivedBytes += chunk.length;
+        if (typeof options.onProgress === "function") {
+          try {
+            options.onProgress(receivedBytes, totalBytes);
+          } catch (error) {
+            fail(error);
+          }
+        }
+      });
+      res.on("aborted", () => fail(new Error("The update download was interrupted before it completed.")));
+      res.on("error", fail);
+      output.on("finish", () => {
+        output.close((error) => {
+          if (error) return fail(error);
+          if (settled) return;
+          settled = true;
+          resolve({ path: destination, bytes: receivedBytes, totalBytes });
+        });
+      });
       res.pipe(output);
-      output.on("finish", () => output.close(() => resolve(destination)));
-      output.on("error", (error) => {
-        fs.rmSync(destination, { force: true });
-        reject(error);
-      });
-      res.on("error", (error) => {
-        output.destroy();
-        fs.rmSync(destination, { force: true });
-        reject(error);
-      });
     });
-    req.setTimeout(120000, () => req.destroy(new Error("Update download timed out.")));
-    req.on("error", reject);
+    req.setTimeout(45000, () => req.destroy(new Error("No data received for 45 seconds; the update download stalled.")));
+    req.on("error", fail);
   });
 }
 
@@ -366,17 +402,54 @@ async function performUpdateAction() {
     const manifestAsset = release.assets.find((item) => item.name === UPDATE_CHECKSUM_ASSET);
     if (!asset || !manifestAsset) throw new Error("The selected release is missing its platform package or checksum manifest.");
 
+    const releaseLabel = release.name || release.tag_name;
     setUpdaterState("downloading", {
-      message: "Downloading and verifying the update…",
-      availableVersion: release.name || release.tag_name,
+      message: "Preparing update download…",
+      stage: "package",
+      percent: 0,
+      downloadedBytes: 0,
+      totalBytes: Number(asset.size) || 0,
+      availableVersion: releaseLabel,
       releaseTag: release.tag_name,
     });
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bomberman-online-update-"));
     const archivePath = path.join(tempDir, path.basename(asset.name));
     const checksumPath = path.join(tempDir, UPDATE_CHECKSUM_ASSET);
     try {
-      await downloadUpdateAsset(asset.browser_download_url, archivePath);
+      let lastProgressAt = 0;
+      await downloadUpdateAsset(asset.browser_download_url, archivePath, {
+        expectedBytes: Number(asset.size) || 0,
+        onProgress: (received, total) => {
+          const now = Date.now();
+          if (now - lastProgressAt < 120 && (!total || received < total)) return;
+          lastProgressAt = now;
+          const expected = total || Number(asset.size) || 0;
+          setUpdaterState("downloading", {
+            message: "Downloading update package…",
+            stage: "package",
+            percent: expected ? Math.min(100, Math.floor(received * 100 / expected)) : null,
+            downloadedBytes: received,
+            totalBytes: expected,
+            availableVersion: releaseLabel,
+            releaseTag: release.tag_name,
+          });
+        },
+      });
+      setUpdaterState("downloading", {
+        message: "Downloading checksum manifest…",
+        stage: "checksum",
+        percent: null,
+        downloadedBytes: 0,
+        totalBytes: 0,
+        availableVersion: releaseLabel,
+        releaseTag: release.tag_name,
+      });
       await downloadUpdateAsset(manifestAsset.browser_download_url, checksumPath);
+      setUpdaterState("verifying", {
+        message: "Verifying update checksum…",
+        availableVersion: releaseLabel,
+        releaseTag: release.tag_name,
+      });
       const checksumText = fs.readFileSync(checksumPath, "utf8");
       const expected = checksumForAsset(checksumText, asset.name);
       const actual = await sha256File(archivePath);
@@ -548,7 +621,7 @@ function dcCommand(args) {
 }
 
 function presetArgs(s) {
-  const scale = Math.max(1, Math.min(8, Number(s.scale) || 1));
+  const scale = Math.max(1, Math.min(9, Number(s.scale) || 1));
   const args = [];
   if (scale !== 1) args.push("--scale", String(scale));
   if (s.aspect === "wide") args.push("--render-aspect", (16 / 9).toFixed(4));
@@ -945,20 +1018,35 @@ function readSettings() {
     stored = {};
   }
   const s = { ...DEFAULTS, ...stored };
-  // Migrate the previous Python launcher schema (display name in "resolution").
-  if (!PRESETS[s.resolution]) {
-    const byLabel = Object.entries(PRESETS).find(
-      ([, p]) => p.label.toLowerCase() === String(s.resolution).toLowerCase()
-    );
-    if (byLabel) s.resolution = byLabel[0];
-    else if (typeof stored.scale === "number") {
-      const byScale = Object.entries(PRESETS).find(([, p]) => p.scale === stored.scale);
-      s.resolution = byScale ? byScale[0] : "native";
-    } else s.resolution = "native";
+  // Migrate preset names saved by versions that mapped them to integer scales.
+  const legacyPresetScales = { "720p": 1.5, "1080p": 2.25, "1440p": 3, "4k": 4.5, "8k": 9 };
+  const savedResolution = String(s.resolution).toLowerCase();
+  if (Object.prototype.hasOwnProperty.call(legacyPresetScales, savedResolution)) {
+    // Old builds wrote the preset name alongside its old integer scale. The named standard
+    // resolution is authoritative now, including its 16:9 aspect requirement.
+    s.resolution = savedResolution;
+    s.scale = legacyPresetScales[savedResolution];
+    s.aspect = "wide";
+  } else if (!PRESETS[s.resolution]) {
+    // Values saved by the brief relabel-only build stay available as custom scales.
+    const intermediateScales = { "960p": 2, "1920p": 4, "2880p": 6, "3840p": 8 };
+    if (Object.prototype.hasOwnProperty.call(intermediateScales, savedResolution)) {
+      s.scale = Number.isFinite(stored.scale) ? stored.scale : intermediateScales[savedResolution];
+      s.resolution = "custom";
+    } else {
+      const byLabel = Object.entries(PRESETS).find(
+        ([, p]) => p.label.toLowerCase() === savedResolution
+      );
+      if (byLabel) s.resolution = byLabel[0];
+      else if (typeof stored.scale === "number") {
+        const byScale = Object.entries(PRESETS).find(([, p]) => p.scale === stored.scale);
+        s.resolution = byScale ? byScale[0] : "custom";
+      } else s.resolution = "native";
+    }
   }
   if (!["bba", "modem", "pppoe"].includes(s.conn)) s.conn = "bba";
   // scale/aspect are authoritative; derive them once for older settings files.
-  if (typeof s.scale !== "number" || s.scale < 1 || s.scale > 8) {
+  if (typeof s.scale !== "number" || !Number.isFinite(s.scale) || s.scale < 1 || s.scale > 9) {
     s.scale = (PRESETS[s.resolution] || PRESETS.native).scale;
   }
   if (!["native", "wide"].includes(s.aspect)) {
@@ -969,10 +1057,13 @@ function readSettings() {
 
 function writeSettings(patch) {
   const merged = { ...readSettings(), ...patch };
-  merged.scale = Math.max(1, Math.min(8, Number(merged.scale) || 1));
+  const requestedScale = Number(merged.scale);
+  merged.scale = Number.isFinite(requestedScale) ? Math.max(1, Math.min(9, requestedScale)) : 1;
   merged.aspect = merged.aspect === "wide" ? "wide" : "native";
-  // Keep the display name in sync with the scale where a preset matches.
-  const preset = Object.entries(PRESETS).find(([, p]) => p.scale === merged.scale);
+  // Match both scale and aspect so a 4:3 custom mode isn't called 720p.
+  const preset = Object.entries(PRESETS).find(([, p]) =>
+    p.scale === merged.scale && (p.aspect ? merged.aspect === "wide" : merged.aspect === "native")
+  );
   merged.resolution = preset ? preset[0] : "custom";
   try {
     fs.mkdirSync(path.dirname(LOCAL_JSON), { recursive: true });
@@ -1200,7 +1291,7 @@ function launchRecompLauncherGame() {
     switch (process.argv[i]) {
       case "--bmo-scale": {
         const scale = Number(process.argv[i + 1]);
-        if (Number.isInteger(scale) && scale >= 1 && scale <= 8) {
+        if (Number.isFinite(scale) && scale >= 1 && scale <= 9) {
           if (scale !== 1) gameArgs.push("--scale", String(scale));
           i++;
         }

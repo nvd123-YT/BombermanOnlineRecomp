@@ -80,9 +80,12 @@ In RecompLauncher, select your own USA Dreamcast image (`.chd`, `.gdi`, or `.cue
 associated `.bin` tracks). It starts the bundled native game directly without opening the
 standalone Electron interface.
 
-The RecompLauncher settings page exposes render scale (1x–8x), aspect ratio, VSync, window/fullscreen
-mode, FPS counter, audio, online play, and BBA/modem selection. By default it follows RecompLauncher's
-mode (fullscreen in Big Picture, windowed on desktop); the display setting can override that. Launching
+The RecompLauncher settings page exposes Native, 720p, 1080p, 1440p, 4K, and 8K resolution choices,
+aspect ratio, VSync, window/fullscreen mode, FPS counter, audio, online play, and BBA/modem selection.
+With Widescreen (16:9) selected, the named presets render internally at exactly 1280×720, 1920×1080,
+2560×1440, 3840×2160, and 7680×4320 respectively. Original (4:3) keeps the same vertical pixel
+counts with a 4:3 render target. By default the display mode follows RecompLauncher (fullscreen in
+Big Picture, windowed on desktop); the display setting can override that. Launching
 the app normally still opens the existing Bomberman launcher.
 
 The current SDK does not read a Dreamcast game ID from CHD/GDI/CUE images. The profile includes
@@ -131,7 +134,7 @@ online in the launcher and enter online mode in-game.
 | Launcher | Electron: disc browse, Play, online, resolution, controller remap, logs, settings |
 | Packaging | electron-builder: macOS .dmg/.zip, Windows .exe/.zip, Linux .AppImage/.deb/.tar.gz |
 | CI | GitHub Actions: native prebuilt game + launcher packages on macOS/Windows/Linux |
-| Menu rendering | suspected stretch; true widescreen TBD |
+| Widescreen | verified working; named HD/4K/8K presets use the requested 16:9 internal pixel dimensions |
 
 ## Repository rules
 
