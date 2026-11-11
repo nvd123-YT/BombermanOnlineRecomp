@@ -10,7 +10,8 @@ on:
     types: [published]
 
 concurrency:
-  group: release-${{ github.ref }}
+  # Recovery publishing uses an isolated slot so a stale runner cannot block it.
+  group: ${{ contains(github.event.head_commit.message || '', '[reuse-artifacts:43092142505]') && format('release-recovery-{0}', github.run_id) || format('release-{0}', github.ref) }}
   cancel-in-progress: true
 
 permissions:
