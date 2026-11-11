@@ -32,62 +32,48 @@
   "settings": [
     {
       "id": "render_scale",
-      "label": "Render scale",
+      "label": "Resolution",
       "group": "Video",
       "in": "args",
-      "help": "1x is the native scale. Higher scales render more pixels and can be more demanding; the actual output size depends on the display and aspect ratio.",
+      "help": "The listed pixel dimensions are achieved when Aspect ratio is set to Widescreen (16:9). With Original (4:3), the render target keeps 4:3 proportions.",
       "choices": [
         {
-          "label": "1x (Native)",
+          "label": "Native (640 × 480 at 4:3)",
           "args": []
         },
         {
-          "label": "2x",
+          "label": "720p (1.5×; 1280 × 720 at 16:9)",
           "args": [
             "--bmo-scale",
-            "2"
+            "1.5"
           ]
         },
         {
-          "label": "3x",
+          "label": "1080p (2.25×; 1920 × 1080 at 16:9)",
+          "args": [
+            "--bmo-scale",
+            "2.25"
+          ]
+        },
+        {
+          "label": "1440p (3×; 2560 × 1440 at 16:9)",
           "args": [
             "--bmo-scale",
             "3"
           ]
         },
         {
-          "label": "4x",
+          "label": "4K (4.5×; 3840 × 2160 at 16:9)",
           "args": [
             "--bmo-scale",
-            "4"
+            "4.5"
           ]
         },
         {
-          "label": "5x",
+          "label": "8K (9×; 7680 × 4320 at 16:9)",
           "args": [
             "--bmo-scale",
-            "5"
-          ]
-        },
-        {
-          "label": "6x",
-          "args": [
-            "--bmo-scale",
-            "6"
-          ]
-        },
-        {
-          "label": "7x",
-          "args": [
-            "--bmo-scale",
-            "7"
-          ]
-        },
-        {
-          "label": "8x",
-          "args": [
-            "--bmo-scale",
-            "8"
+            "9"
           ]
         }
       ]

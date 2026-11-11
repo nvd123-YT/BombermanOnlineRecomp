@@ -79,18 +79,18 @@
           <label id="resLabel">Resolution preset</label>
           <div class="pills" id="resPills" role="group" aria-labelledby="resLabel">
             <button data-preset="native">Native</button>
-            <button data-preset="960p">960p</button>
+            <button data-preset="720p">720p</button>
+            <button data-preset="1080p">1080p</button>
             <button data-preset="1440p">1440p</button>
-            <button data-preset="1920p">1920p</button>
-            <button data-preset="2880p">2880p</button>
-            <button data-preset="3840p">3840p</button>
+            <button data-preset="4k">4K</button>
+            <button data-preset="8k">8K</button>
           </div>
         </div>
 
         <div class="field two">
           <div>
             <label for="scaleRange">Render scale <span id="scaleVal" class="mono">1×</span></label>
-            <input id="scaleRange" type="range" min="1" max="8" step="1" value="1" />
+            <input id="scaleRange" type="range" min="1" max="9" step="0.25" value="1" />
           </div>
           <div>
             <label for="aspectSel">Aspect ratio</label>

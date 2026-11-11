@@ -91,13 +91,14 @@ function presetForScale(scale) {
 
 function refreshDerived() {
   // Render output readout.
-  const scale = clamp(Number(S.scale) || 1, 1, 8);
+  const scale = clamp(Number(S.scale) || 1, 1, 9);
   const wide = S.aspect === "wide" ? (16 / 9) / (4 / 3) : 1;
   const width = Math.round(640 * scale * wide);
   const height = Math.round(480 * scale);
   $("renderOut").textContent = `${width} × ${height}`;
-  $("scaleVal").textContent = `${scale}×`;
-  const pct = ((scale - 1) / 7) * 100;
+  const scaleText = Number.isInteger(scale) ? String(scale) : String(Number(scale.toFixed(2)));
+  $("scaleVal").textContent = `${scaleText}×`;
+  const pct = ((scale - 1) / 8) * 100;
   $("scaleRange").style.setProperty("--fill", `${pct}%`);
 
   // Preset pills.
@@ -642,7 +643,7 @@ function bindEvents() {
   });
 
   $("scaleRange").addEventListener("input", () => {
-    S.scale = clamp(Number($("scaleRange").value) || 1, 1, 8);
+    S.scale = clamp(Number($("scaleRange").value) || 1, 1, 9);
     S.resolution = presetForScale(S.scale) || "native";
     refreshDerived();
     save();
@@ -748,7 +749,7 @@ async function init() {
   document.body.classList.toggle("mac", snapshot.platform === "darwin");
 
   // Seed controls from settings.
-  $("scaleRange").value = String(clamp(Number(S.scale) || 1, 1, 8));
+  $("scaleRange").value = String(clamp(Number(S.scale) || 1, 1, 9));
   $("aspectSel").value = S.aspect === "wide" ? "wide" : "native";
   $("vsync").checked = !!S.vsync;
   $("fullscreen").checked = !!S.fullscreen;

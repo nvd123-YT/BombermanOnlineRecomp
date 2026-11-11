@@ -58,11 +58,11 @@ const DEFAULTS = {
 
 const PRESETS = {
   native: { scale: 1, aspect: null, label: "Native" },
-  "960p": { scale: 2, aspect: 16 / 9, label: "960p" },
+  "720p": { scale: 1.5, aspect: 16 / 9, label: "720p" },
+  "1080p": { scale: 2.25, aspect: 16 / 9, label: "1080p" },
   "1440p": { scale: 3, aspect: 16 / 9, label: "1440p" },
-  "1920p": { scale: 4, aspect: 16 / 9, label: "1920p" },
-  "2880p": { scale: 6, aspect: 16 / 9, label: "2880p" },
-  "3840p": { scale: 8, aspect: 16 / 9, label: "3840p" },
+  "4k": { scale: 4.5, aspect: 16 / 9, label: "4K" },
+  "8k": { scale: 9, aspect: 16 / 9, label: "8K" },
 };
 
 
@@ -621,7 +621,7 @@ function dcCommand(args) {
 }
 
 function presetArgs(s) {
-  const scale = Math.max(1, Math.min(8, Number(s.scale) || 1));
+  const scale = Math.max(1, Math.min(9, Number(s.scale) || 1));
   const args = [];
   if (scale !== 1) args.push("--scale", String(scale));
   if (s.aspect === "wide") args.push("--render-aspect", (16 / 9).toFixed(4));
@@ -1018,24 +1018,32 @@ function readSettings() {
     stored = {};
   }
   const s = { ...DEFAULTS, ...stored };
-  // Migrate the previous Python launcher schema (display name in "resolution").
-  if (!PRESETS[s.resolution]) {
-    const legacyNames = { "720p": "960p", "1080p": "1440p", "1440p": "1920p", "4k": "2880p", "8k": "3840p" };
-    const byLabel = Object.entries(PRESETS).find(
-      ([, p]) => p.label.toLowerCase() === String(s.resolution).toLowerCase()
-    );
-    if (byLabel) s.resolution = byLabel[0];
-    else if (legacyNames[String(s.resolution).toLowerCase()]) {
-      s.resolution = legacyNames[String(s.resolution).toLowerCase()];
-      if (typeof stored.scale !== "number") s.scale = PRESETS[s.resolution].scale;
-    } else if (typeof stored.scale === "number") {
-      const byScale = Object.entries(PRESETS).find(([, p]) => p.scale === stored.scale);
-      s.resolution = byScale ? byScale[0] : "native";
-    } else s.resolution = "native";
+  // Migrate preset names saved by versions that mapped them to integer scales.
+  const legacyPresetScales = { "720p": 1.5, "1080p": 2.25, "1440p": 3, "4k": 4.5, "8k": 9 };
+  const savedResolution = String(s.resolution).toLowerCase();
+  if (Object.prototype.hasOwnProperty.call(legacyPresetScales, savedResolution)) {
+    s.resolution = savedResolution;
+    s.scale = legacyPresetScales[savedResolution];
+  } else if (!PRESETS[s.resolution]) {
+    // Values saved by the brief relabel-only build stay available as custom scales.
+    const intermediateScales = { "960p": 2, "1920p": 4, "2880p": 6, "3840p": 8 };
+    if (Object.prototype.hasOwnProperty.call(intermediateScales, savedResolution)) {
+      s.scale = Number.isFinite(stored.scale) ? stored.scale : intermediateScales[savedResolution];
+      s.resolution = "custom";
+    } else {
+      const byLabel = Object.entries(PRESETS).find(
+        ([, p]) => p.label.toLowerCase() === savedResolution
+      );
+      if (byLabel) s.resolution = byLabel[0];
+      else if (typeof stored.scale === "number") {
+        const byScale = Object.entries(PRESETS).find(([, p]) => p.scale === stored.scale);
+        s.resolution = byScale ? byScale[0] : "custom";
+      } else s.resolution = "native";
+    }
   }
   if (!["bba", "modem", "pppoe"].includes(s.conn)) s.conn = "bba";
   // scale/aspect are authoritative; derive them once for older settings files.
-  if (typeof s.scale !== "number" || s.scale < 1 || s.scale > 8) {
+  if (typeof s.scale !== "number" || !Number.isFinite(s.scale) || s.scale < 1 || s.scale > 9) {
     s.scale = (PRESETS[s.resolution] || PRESETS.native).scale;
   }
   if (!["native", "wide"].includes(s.aspect)) {
@@ -1046,10 +1054,13 @@ function readSettings() {
 
 function writeSettings(patch) {
   const merged = { ...readSettings(), ...patch };
-  merged.scale = Math.max(1, Math.min(8, Number(merged.scale) || 1));
+  const requestedScale = Number(merged.scale);
+  merged.scale = Number.isFinite(requestedScale) ? Math.max(1, Math.min(9, requestedScale)) : 1;
   merged.aspect = merged.aspect === "wide" ? "wide" : "native";
-  // Keep the display name in sync with the scale where a preset matches.
-  const preset = Object.entries(PRESETS).find(([, p]) => p.scale === merged.scale);
+  // Match both scale and aspect so a 4:3 custom mode isn't called 720p.
+  const preset = Object.entries(PRESETS).find(([, p]) =>
+    p.scale === merged.scale && (p.aspect ? merged.aspect === "wide" : merged.aspect === "native")
+  );
   merged.resolution = preset ? preset[0] : "custom";
   try {
     fs.mkdirSync(path.dirname(LOCAL_JSON), { recursive: true });
@@ -1277,7 +1288,7 @@ function launchRecompLauncherGame() {
     switch (process.argv[i]) {
       case "--bmo-scale": {
         const scale = Number(process.argv[i + 1]);
-        if (Number.isInteger(scale) && scale >= 1 && scale <= 8) {
+        if (Number.isFinite(scale) && scale >= 1 && scale <= 9) {
           if (scale !== 1) gameArgs.push("--scale", String(scale));
           i++;
         }
