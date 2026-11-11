@@ -1,6 +1,7 @@
 #include "dream/runtime/hw/bba.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <utility>
@@ -52,12 +53,25 @@ Bba::Bba(sched::Scheduler& sched, holly::Intc& intc, Config config)
     });
     net_.set_verbose(config_.verbose);
     reset();
+    reconnect_thread_ = std::thread(&Bba::reconnect_main, this);
 }
 
 Bba::~Bba() {
+    {
+        std::lock_guard<std::mutex> lock(reconnect_mutex_);
+        reconnect_shutdown_ = true;
+        reconnect_ready_ = false;
+        online_started_.store(false, std::memory_order_release);
+    }
+    reconnect_cv_.notify_all();
+    if (reconnect_thread_.joinable())
+        reconnect_thread_.join();
     if (poll_event_ >= 0)
         sched_.cancel(poll_event_);
-    net_.stop();
+    {
+        std::lock_guard<std::mutex> lock(net_control_mutex_);
+        net_.stop();
+    }
 }
 
 void Bba::start() {
@@ -96,6 +110,10 @@ void Bba::reset() {
     {
         std::lock_guard<std::mutex> lock(rx_mutex_);
         rx_queue_.clear();
+    }
+    {
+        std::lock_guard<std::mutex> lock(pending_tx_mutex_);
+        pending_tx_.clear();
     }
     rx_pending_.store(false);
     reset_rtl();
@@ -209,8 +227,22 @@ void Bba::write(std::uint32_t addr, std::uint32_t value, unsigned size) {
                 if (value & 1u) {
                     std::printf("bba: bridge reset\n");
                     reset_rtl();
-                    net_.stop();
-                    online_started_ = false;
+                    {
+                        std::lock_guard<std::mutex> lock(reconnect_mutex_);
+                        reconnect_ready_ = false;
+                        online_host_.clear();
+                        online_discovered_ = false;
+                        online_started_.store(false, std::memory_order_release);
+                    }
+                    {
+                        std::lock_guard<std::mutex> lock(pending_tx_mutex_);
+                        pending_tx_.clear();
+                    }
+                    reconnect_cv_.notify_all();
+                    {
+                        std::lock_guard<std::mutex> lock(net_control_mutex_);
+                        net_.stop();
+                    }
                 }
             } else if (reg == kGapsDmaOffset) {
                 dma_offset_ = value & (kSramSize - 1u);
@@ -739,23 +771,118 @@ void Bba::prom_decode(std::uint8_t command) {
 // Transmit and receive
 
 void Bba::ensure_online() {
-    if (online_started_)
+    if (online_started_.exchange(true, std::memory_order_acq_rel))
         return;
-    online_started_ = true;
-    std::string host = config_.server;
-    if (config_.discover || host.empty()) {
-        std::string error;
-        std::string found = host;
-        if (net::DcNetClient::discover(found, config_.port, error))
-            host = found;
-        else if (host.empty())
-            host = "dcnet.flyca.st";
+    {
+        std::lock_guard<std::mutex> lock(reconnect_mutex_);
+        online_host_ = config_.server;
+        online_discovered_ = false;
+        reconnect_ready_ = true;
     }
-    std::string error;
-    if (net_.start(host, config_.port, net::DcNetClient::Mode::Ethernet, error)) {
-        std::printf("bba: online through DCNet at %s\n", net_.endpoint().c_str());
-    } else {
-        std::printf("bba: online unavailable (%s)\n", error.c_str());
+    reconnect_cv_.notify_all();
+    std::printf("bba: DCNet connection requested; connecting in background
+");
+}
+
+void Bba::flush_pending_tx() {
+    while (net_.connected()) {
+        std::vector<std::uint8_t> frame;
+        {
+            std::lock_guard<std::mutex> lock(pending_tx_mutex_);
+            if (pending_tx_.empty())
+                return;
+            frame = std::move(pending_tx_.front());
+            pending_tx_.pop_front();
+        }
+        bool accepted = false;
+        {
+            std::lock_guard<std::mutex> net_lock(net_control_mutex_);
+            accepted = net_.send_frame(frame.data(), frame.size());
+        }
+        if (!accepted) {
+            std::lock_guard<std::mutex> lock(pending_tx_mutex_);
+            pending_tx_.push_front(std::move(frame));
+            return;
+        }
+    }
+}
+
+void Bba::reconnect_main() {
+    std::unique_lock<std::mutex> state_lock(reconnect_mutex_);
+    auto retry_delay = std::chrono::seconds(0);
+    while (!reconnect_shutdown_) {
+        reconnect_cv_.wait(state_lock, [this] {
+            return reconnect_shutdown_ || reconnect_ready_;
+        });
+        if (reconnect_shutdown_)
+            break;
+
+        // First attempt immediately. DNS, directory discovery and TCP connect all happen here,
+        // never on the emulation/audio/render path.
+        if (retry_delay.count() > 0 &&
+            reconnect_cv_.wait_for(state_lock, retry_delay, [this] {
+                return reconnect_shutdown_ || !reconnect_ready_;
+            })) {
+            retry_delay = std::chrono::seconds(0);
+            continue;
+        }
+        if (reconnect_shutdown_ || !reconnect_ready_)
+            continue;
+
+        const bool need_discovery = config_.discover && !online_discovered_;
+        std::string host = online_host_;
+        state_lock.unlock();
+
+        std::string error;
+        if (need_discovery || host.empty()) {
+            std::string found = host;
+            if (net::DcNetClient::discover(found, config_.port, error)) {
+                host = found;
+            } else if (host.empty()) {
+                host = "dcnet.flyca.st";
+            }
+        }
+
+        bool connected = false;
+        {
+            std::lock_guard<std::mutex> net_lock(net_control_mutex_);
+            if (online_started_.load(std::memory_order_acquire)) {
+                if (net_.connected()) {
+                    connected = true;
+                } else {
+                    // Failed reader/writer threads remain joinable. stop() joins them before reuse.
+                    net_.stop();
+                    connected = net_.start(host, config_.port, net::DcNetClient::Mode::Ethernet, error);
+                }
+            }
+        }
+
+        state_lock.lock();
+        if (reconnect_shutdown_)
+            break;
+        if (!reconnect_ready_ || !online_started_.load(std::memory_order_acquire)) {
+            retry_delay = std::chrono::seconds(0);
+            continue;
+        }
+        online_host_ = host;
+        online_discovered_ = true;
+        if (connected) {
+            retry_delay = std::chrono::seconds(1);
+            std::printf("bba: DCNet connected at %s
+", net_.endpoint().c_str());
+        } else {
+            const auto delay = retry_delay.count() == 0 ? 1 : retry_delay.count();
+            std::fprintf(stderr, "bba: DCNet connect/reconnect failed (%s); retrying in %lld s
+",
+                         error.empty() ? "connection lost" : error.c_str(),
+                         static_cast<long long>(delay));
+            retry_delay = retry_delay.count() == 0 ? std::chrono::seconds(1)
+                                                    : std::min(retry_delay * 2, std::chrono::seconds(30));
+        }
+        state_lock.unlock();
+        if (connected)
+            flush_pending_tx();
+        state_lock.lock();
     }
 }
 
@@ -787,7 +914,25 @@ bool Bba::transmit_one(unsigned descriptor) {
         receive(frame.data(), frame.size());
     else {
         ensure_online();
-        net_.send_frame(frame.data(), frame.size());
+        bool accepted = false;
+        {
+            std::lock_guard<std::mutex> net_lock(net_control_mutex_);
+            accepted = net_.send_frame(frame.data(), frame.size());
+        }
+        if (!accepted) {
+            bool queued = false;
+            {
+                std::lock_guard<std::mutex> lock(pending_tx_mutex_);
+                if (pending_tx_.size() < 256) {
+                    pending_tx_.push_back(std::move(frame));
+                    queued = true;
+                } else {
+                    tx_dropped.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+            if (queued)
+                flush_pending_tx();
+        }
     }
 
     intr_status_ |= kIntrTxOk;

@@ -92,8 +92,9 @@ function presetForScale(scale) {
 function refreshDerived() {
   // Render output readout.
   const scale = clamp(Number(S.scale) || 1, 1, 8);
-  const width = 640 * scale;
-  const height = S.aspect === "wide" ? Math.round(width / (16 / 9)) : 480 * scale;
+  const wide = S.aspect === "wide" ? (16 / 9) / (4 / 3) : 1;
+  const width = Math.round(640 * scale * wide);
+  const height = Math.round(480 * scale);
   $("renderOut").textContent = `${width} × ${height}`;
   $("scaleVal").textContent = `${scale}×`;
   const pct = ((scale - 1) / 7) * 100;
@@ -580,15 +581,22 @@ function renderUpdateState(state) {
     development: "Releases",
     checking: "Checking…",
     available: `Download ${state.availableVersion || "update"}`,
-    downloading: state.percent == null ? "Downloading…" : `Downloading ${state.percent}%`,
+    downloading: state.stage === "checksum"
+      ? "Downloading checksum…"
+      : state.percent == null ? "Downloading…" : `Downloading ${state.percent}%`,
+    verifying: "Verifying…",
     installing: "Installing…",
     current: "Up to date",
     manual: "Download update",
     error: "Retry update",
   };
   btn.textContent = labels[state.state] || "Check for updates";
-  btn.disabled = ["checking", "downloading", "installing"].includes(state.state);
-  btn.title = state.message || "";
+  btn.disabled = ["checking", "downloading", "verifying", "installing"].includes(state.state);
+  const mb = (bytes) => (Number(bytes || 0) / (1024 * 1024)).toFixed(1);
+  const progressDetail = state.stage === "package" && state.downloadedBytes != null
+    ? ` ${mb(state.downloadedBytes)} / ${mb(state.totalBytes)} MiB`
+    : "";
+  btn.title = (state.message || "") + progressDetail;
   btn.classList.toggle("update-ready", state.state === "available");
 }
 
@@ -603,7 +611,7 @@ async function updateAction() {
     toast(`Update check failed: ${error}`, "err");
   } finally {
     // Keep the button disabled only while the updater is actively working.
-    if (btn.isConnected) btn.disabled = ["checking", "downloading", "installing"].includes(updateStatus.state);
+    if (btn.isConnected) btn.disabled = ["checking", "downloading", "verifying", "installing"].includes(updateStatus.state);
   }
 }
 

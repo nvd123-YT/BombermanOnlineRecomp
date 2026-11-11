@@ -58,11 +58,11 @@ const DEFAULTS = {
 
 const PRESETS = {
   native: { scale: 1, aspect: null, label: "Native" },
-  "720p": { scale: 2, aspect: 16 / 9, label: "720p" },
-  "1080p": { scale: 3, aspect: 16 / 9, label: "1080p" },
-  "1440p": { scale: 4, aspect: 16 / 9, label: "1440p" },
-  "4k": { scale: 6, aspect: 16 / 9, label: "4K" },
-  "8k": { scale: 8, aspect: 16 / 9, label: "8K" },
+  "960p": { scale: 2, aspect: 16 / 9, label: "960p" },
+  "1440p": { scale: 3, aspect: 16 / 9, label: "1440p" },
+  "1920p": { scale: 4, aspect: 16 / 9, label: "1920p" },
+  "2880p": { scale: 6, aspect: 16 / 9, label: "2880p" },
+  "3840p": { scale: 8, aspect: 16 / 9, label: "3840p" },
 };
 
 
@@ -231,39 +231,75 @@ function httpsBuffer(url, redirects = 0) {
   });
 }
 
-function downloadUpdateAsset(url, destination, redirects = 0) {
+function downloadUpdateAsset(url, destination, options = {}, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > 6) return reject(new Error("Too many redirects while downloading the update."));
     const target = new URL(url);
+    let output = null;
+    let response = null;
+    let settled = false;
+
+    const removePartial = () => {
+      try { fs.rmSync(destination, { force: true }); } catch {}
+    };
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      if (response && output) response.unpipe(output);
+      if (output && !output.closed) {
+        output.once("close", removePartial);
+        output.destroy();
+      } else {
+        removePartial();
+      }
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+
     const req = require("https").get(target, {
       headers: { "User-Agent": "BombermanOnlineLauncher-Updater/1.0" },
     }, (res) => {
+      response = res;
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();
-        downloadUpdateAsset(new URL(res.headers.location, target).toString(), destination, redirects + 1)
+        downloadUpdateAsset(new URL(res.headers.location, target).toString(), destination, options, redirects + 1)
           .then(resolve, reject);
         return;
       }
       if (res.statusCode !== 200) {
         res.resume();
-        reject(new Error(`Update download failed with HTTP ${res.statusCode || "unknown"}.`));
+        fail(new Error(`Update download failed with HTTP ${res.statusCode || "unknown"}.`));
         return;
       }
-      const output = fs.createWriteStream(destination, { flags: "wx" });
+
+      const headerBytes = Number(res.headers["content-length"]) || 0;
+      const totalBytes = headerBytes || Number(options.expectedBytes) || 0;
+      let receivedBytes = 0;
+      output = fs.createWriteStream(destination, { flags: "wx" });
+      output.on("error", fail);
+      res.on("data", (chunk) => {
+        receivedBytes += chunk.length;
+        if (typeof options.onProgress === "function") {
+          try {
+            options.onProgress(receivedBytes, totalBytes);
+          } catch (error) {
+            fail(error);
+          }
+        }
+      });
+      res.on("aborted", () => fail(new Error("The update download was interrupted before it completed.")));
+      res.on("error", fail);
+      output.on("finish", () => {
+        output.close((error) => {
+          if (error) return fail(error);
+          if (settled) return;
+          settled = true;
+          resolve({ path: destination, bytes: receivedBytes, totalBytes });
+        });
+      });
       res.pipe(output);
-      output.on("finish", () => output.close(() => resolve(destination)));
-      output.on("error", (error) => {
-        fs.rmSync(destination, { force: true });
-        reject(error);
-      });
-      res.on("error", (error) => {
-        output.destroy();
-        fs.rmSync(destination, { force: true });
-        reject(error);
-      });
     });
-    req.setTimeout(120000, () => req.destroy(new Error("Update download timed out.")));
-    req.on("error", reject);
+    req.setTimeout(45000, () => req.destroy(new Error("No data received for 45 seconds; the update download stalled.")));
+    req.on("error", fail);
   });
 }
 
@@ -366,17 +402,54 @@ async function performUpdateAction() {
     const manifestAsset = release.assets.find((item) => item.name === UPDATE_CHECKSUM_ASSET);
     if (!asset || !manifestAsset) throw new Error("The selected release is missing its platform package or checksum manifest.");
 
+    const releaseLabel = release.name || release.tag_name;
     setUpdaterState("downloading", {
-      message: "Downloading and verifying the update…",
-      availableVersion: release.name || release.tag_name,
+      message: "Preparing update download…",
+      stage: "package",
+      percent: 0,
+      downloadedBytes: 0,
+      totalBytes: Number(asset.size) || 0,
+      availableVersion: releaseLabel,
       releaseTag: release.tag_name,
     });
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bomberman-online-update-"));
     const archivePath = path.join(tempDir, path.basename(asset.name));
     const checksumPath = path.join(tempDir, UPDATE_CHECKSUM_ASSET);
     try {
-      await downloadUpdateAsset(asset.browser_download_url, archivePath);
+      let lastProgressAt = 0;
+      await downloadUpdateAsset(asset.browser_download_url, archivePath, {
+        expectedBytes: Number(asset.size) || 0,
+        onProgress: (received, total) => {
+          const now = Date.now();
+          if (now - lastProgressAt < 120 && (!total || received < total)) return;
+          lastProgressAt = now;
+          const expected = total || Number(asset.size) || 0;
+          setUpdaterState("downloading", {
+            message: "Downloading update package…",
+            stage: "package",
+            percent: expected ? Math.min(100, Math.floor(received * 100 / expected)) : null,
+            downloadedBytes: received,
+            totalBytes: expected,
+            availableVersion: releaseLabel,
+            releaseTag: release.tag_name,
+          });
+        },
+      });
+      setUpdaterState("downloading", {
+        message: "Downloading checksum manifest…",
+        stage: "checksum",
+        percent: null,
+        downloadedBytes: 0,
+        totalBytes: 0,
+        availableVersion: releaseLabel,
+        releaseTag: release.tag_name,
+      });
       await downloadUpdateAsset(manifestAsset.browser_download_url, checksumPath);
+      setUpdaterState("verifying", {
+        message: "Verifying update checksum…",
+        availableVersion: releaseLabel,
+        releaseTag: release.tag_name,
+      });
       const checksumText = fs.readFileSync(checksumPath, "utf8");
       const expected = checksumForAsset(checksumText, asset.name);
       const actual = await sha256File(archivePath);
@@ -947,11 +1020,15 @@ function readSettings() {
   const s = { ...DEFAULTS, ...stored };
   // Migrate the previous Python launcher schema (display name in "resolution").
   if (!PRESETS[s.resolution]) {
+    const legacyNames = { "720p": "960p", "1080p": "1440p", "1440p": "1920p", "4k": "2880p", "8k": "3840p" };
     const byLabel = Object.entries(PRESETS).find(
       ([, p]) => p.label.toLowerCase() === String(s.resolution).toLowerCase()
     );
     if (byLabel) s.resolution = byLabel[0];
-    else if (typeof stored.scale === "number") {
+    else if (legacyNames[String(s.resolution).toLowerCase()]) {
+      s.resolution = legacyNames[String(s.resolution).toLowerCase()];
+      if (typeof stored.scale !== "number") s.scale = PRESETS[s.resolution].scale;
+    } else if (typeof stored.scale === "number") {
       const byScale = Object.entries(PRESETS).find(([, p]) => p.scale === stored.scale);
       s.resolution = byScale ? byScale[0] : "native";
     } else s.resolution = "native";

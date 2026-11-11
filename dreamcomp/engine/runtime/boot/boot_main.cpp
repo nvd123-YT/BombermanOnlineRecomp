@@ -1221,10 +1221,12 @@ std::string report_text(dream::System& sys, dream::hle::Bios& bios, const dream:
         const char* state = !bba->online_started()
                                 ? "idle"
                                 : (bba->online_connected() ? "online, connected" : "online, disconnected");
-        std::snprintf(buf, sizeof buf, "BBA: %llu frames in, %llu frames out, %llu dropped, %s\n",
+        std::snprintf(buf, sizeof buf,
+                      "BBA: %llu frames in, %llu frames out, %llu RX dropped, %llu TX dropped, %s\n",
                       static_cast<unsigned long long>(bba->rx_frames),
                       static_cast<unsigned long long>(bba->tx_frames),
-                      static_cast<unsigned long long>(bba->rx_dropped.load()), state);
+                      static_cast<unsigned long long>(bba->rx_dropped.load()),
+                      static_cast<unsigned long long>(bba->tx_dropped.load()), state);
         s += buf;
     }
     std::snprintf(
