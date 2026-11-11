@@ -631,13 +631,18 @@ function startProcess(label, command, baseArgs, envPatch = {}, onExit = null) {
   pipe(proc.stdout, "out");
   pipe(proc.stderr, "err");
 
-  proc.on("error", (err) => emit("log", { stream: "err", text: String(err) }));
-  proc.on("exit", (code, signal) => {
-    child = null;
-    emit("log", { stream: "meta", text: `${label} exited (${signal || code})` });
-    emit("task", { running: false, label, code, signal });
+  let finished = false;
+  const finish = (code, signal, error = null) => {
+    if (finished) return;
+    finished = true;
+    if (child === proc) child = null;
+    if (error) emit("log", { stream: "err", text: String(error) });
+    emit("log", { stream: "meta", text: error ? `${label} failed to start` : `${label} exited (${signal || code})` });
+    emit("task", { running: false, label, code, signal, error: error ? String(error) : undefined });
     if (onExit) onExit(code, signal);
-  });
+  };
+  proc.on("error", (err) => finish(null, null, err));
+  proc.on("exit", (code, signal) => finish(code, signal));
   return { ok: true, pid: proc.pid };
 }
 
