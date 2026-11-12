@@ -107,6 +107,7 @@ jobs:
           git clone --depth 1 --branch release-3.4.20 https://github.com/libsdl-org/SDL.git "$RUNNER_TEMP/SDL"
           cmake -S "$RUNNER_TEMP/SDL" -B "$RUNNER_TEMP/SDL-build" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded \
             -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdl3" \
             -DSDL_SHARED=OFF -DSDL_STATIC=ON \
             -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF \
@@ -120,6 +121,7 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded \
             -DDREAMCOMP_DIR=dreamcomp \
             -DDREAM_RENDERER=ON \
             -DDREAMCOMP_FRONTEND=ON \
@@ -143,20 +145,37 @@ jobs:
           echo "Prebuilt executable ready: $GAME_EXE"
           ls -lah build/game
 
-      - name: Stage Windows Vulkan loader when present
+      - name: Bundle Windows Vulkan loader
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # The Vulkan SDK supplies headers, import libraries and shader tools.
-          # The runtime loader is normally installed by the user's graphics driver
-          # into Windows\System32; the SDK archive is not guaranteed to include it.
-          $loader = Join-Path $env:SystemRoot "System32\vulkan-1.dll"
-          if (Test-Path $loader) {
-            Copy-Item $loader "build/game/vulkan-1.dll" -Force
-            Write-Host "Bundled the runner's Vulkan loader: $loader"
-          } else {
-            Write-Host "No Vulkan loader on this runner; Windows graphics drivers provide vulkan-1.dll on target systems. Continuing package build."
+          # The executable imports vulkan-1.dll through the Vulkan SDK import
+          # library. Ship the matching x64 loader beside the game executable so
+          # RecompLauncher does not depend on the player's graphics driver having
+          # installed a global Vulkan loader in System32.
+          $sdkLoader = $null
+          if (-not [string]::IsNullOrWhiteSpace($env:VULKAN_SDK)) {
+            $candidate = Join-Path $env:VULKAN_SDK "Bin\vulkan-1.dll"
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+              $sdkLoader = $candidate
+            }
           }
+          $systemLoader = Join-Path $env:SystemRoot "System32\vulkan-1.dll"
+          if ($sdkLoader) {
+            $loader = $sdkLoader
+          } elseif (Test-Path -LiteralPath $systemLoader -PathType Leaf) {
+            $loader = $systemLoader
+          } else {
+            throw "The Vulkan SDK/runtime did not provide an x64 vulkan-1.dll; refusing to create a Windows package that cannot start."
+          }
+          $target = Join-Path (Resolve-Path "build/game").Path "vulkan-1.dll"
+          Copy-Item -LiteralPath $loader -Destination $target -Force
+          if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
+            throw "Failed to stage vulkan-1.dll beside bomberman-online.exe."
+          }
+          $file = Get-Item -LiteralPath $target
+          Write-Host "Bundled Vulkan loader: $loader ($($file.Length) bytes)"
+          Get-FileHash -LiteralPath $target -Algorithm SHA256 | Format-List
 
       - name: Bundle Vulkan runtime for macOS
         if: runner.os == 'macOS'
