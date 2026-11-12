@@ -30,6 +30,27 @@ const EXE = path.join(
 // so a distributed app that has never seen this machine's disc must extract before building.
 const EXTRACTED = path.join(ROOT, "game", "extracted", "fs", "1ST_READ.BIN");
 const SELFTEST = process.argv.includes("--selftest");
+
+// RecompLauncher normally substitutes {game} into --game, but keep an environment
+// fallback as well because native app-bundle launchers do not always retain custom argv.
+function suppliedRecompLauncherDisc(argv = process.argv, env = process.env) {
+  const flags = ["--game", "--disc", "--iso"];
+  for (let i = 0; i < argv.length; i++) {
+    const argument = String(argv[i] ?? "");
+    for (const flag of flags) {
+      if (argument.startsWith(`${flag}=`)) {
+        const value = argument.slice(flag.length + 1).trim();
+        if (value) return value;
+      }
+      if (argument === flag) {
+        const value = String(argv[i + 1] ?? "").trim();
+        if (value && !value.startsWith("--")) return value;
+      }
+    }
+  }
+
+  return typeof env.BMO_RECOMP_DISC === "string" ? env.BMO_RECOMP_DISC.trim() : "";
+}
 let selftestWatchdog = null;
 
 if (SELFTEST) {
@@ -921,6 +942,38 @@ function withSelftestTimeout(promise, timeoutMs, label) {
 
 async function runSelftest() {
   const failures = [];
+  const discArgTests = [
+    {
+      label: "--game value",
+      argv: ["launcher", "--game", "/tmp/Bomberman Online.cue"],
+      env: {},
+      expected: "/tmp/Bomberman Online.cue",
+    },
+    {
+      label: "--game=value",
+      argv: ["launcher", "--game=/tmp/Bomberman Online.cue"],
+      env: {},
+      expected: "/tmp/Bomberman Online.cue",
+    },
+    {
+      label: "--disc alias",
+      argv: ["launcher", "--disc", "/tmp/Bomberman Online.chd"],
+      env: {},
+      expected: "/tmp/Bomberman Online.chd",
+    },
+    {
+      label: "RecompLauncher environment fallback",
+      argv: ["launcher"],
+      env: { BMO_RECOMP_DISC: "/tmp/Bomberman Online.gdi" },
+      expected: "/tmp/Bomberman Online.gdi",
+    },
+  ];
+  for (const test of discArgTests) {
+    const actual = suppliedRecompLauncherDisc(test.argv, test.env);
+    if (actual !== test.expected) {
+      failures.push(`RecompLauncher disc handoff failed for ${test.label}: expected ${test.expected}, got ${actual || "(empty)"}`);
+    }
+  }
   let report = null;
   let stats = null;
   let screenshot = null;
@@ -1253,6 +1306,7 @@ ipcMain.handle("win:close", () => win && win.close());
 // RecompLauncher direct launch
 // ---------------------------------------------------------------------------
 // RecompLauncher sets RECOMPLAUNCHER=1 and supplies the player's disc with --game.
+// BMO_RECOMP_DISC is the matching environment fallback in recomplauncher.json.
 // Keep this path opt-in: ordinary standalone launches still open the existing UI.
 function launchRecompLauncherGame() {
   if (process.env.RECOMPLAUNCHER !== "1") return false;
@@ -1261,8 +1315,7 @@ function launchRecompLauncherGame() {
     console.error(`[RecompLauncher] ${message}`);
     app.exit(1);
   };
-  const gameIndex = process.argv.indexOf("--game");
-  const suppliedDisc = gameIndex >= 0 ? process.argv[gameIndex + 1] : "";
+  const suppliedDisc = suppliedRecompLauncherDisc(process.argv, process.env);
   if (!suppliedDisc || suppliedDisc.startsWith("--")) {
     fail("No disc image was supplied. Reinstall the game copy in RecompLauncher and try again.");
     return true;
@@ -1287,7 +1340,7 @@ function launchRecompLauncherGame() {
   const options = { online: false, conn: "bba", dcnet: true, server: "", serverPort: "", fullscreen: process.env.RECOMPLAUNCHER_MODE === "bigpicture" };
 
   // These names are deliberately app-specific so Chromium/Electron doesn't consume them.
-  for (let i = gameIndex + 2; i < process.argv.length; i++) {
+  for (let i = 1; i < process.argv.length; i++) {
     switch (process.argv[i]) {
       case "--bmo-scale": {
         const scale = Number(process.argv[i + 1]);
