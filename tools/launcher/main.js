@@ -31,8 +31,8 @@ const EXE = path.join(
 const EXTRACTED = path.join(ROOT, "game", "extracted", "fs", "1ST_READ.BIN");
 const SELFTEST = process.argv.includes("--selftest");
 
-// RecompLauncher normally substitutes {game} into --game, but keep an environment
-// fallback as well because native app-bundle launchers do not always retain custom argv.
+// RecompLauncher normally substitutes {game} into --game. Keep an environment
+// fallback for launch hosts that do not preserve custom process arguments.
 function suppliedRecompLauncherDisc(argv = process.argv, env = process.env) {
   const flags = ["--game", "--disc", "--iso"];
   for (let i = 0; i < argv.length; i++) {
