@@ -14,7 +14,20 @@ const { spawn, spawnSync } = require("child_process");
 // bundle: Linux AppImages mount read-only, and Program Files / /Applications may not be writable.
 // Use a per-user workspace and seed it from the copy bundled with the app.
 const BUNDLED_ROOT = findRepoRoot();
-const ROOT = app.isPackaged ? path.join(app.getPath("userData"), "workspace") : BUNDLED_ROOT;
+// Keep the previous Windows workspace location for one-time user-data migration.
+// Engine/source trees belong in LocalAppData rather than the roaming profile.
+const LEGACY_WORKSPACE_ROOT = app.isPackaged
+  ? path.join(app.getPath("userData"), "workspace")
+  : null;
+const ROOT = app.isPackaged
+  ? (process.platform === "win32"
+    ? path.join(
+      process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
+      path.basename(app.getPath("userData")),
+      "workspace"
+    )
+    : LEGACY_WORKSPACE_ROOT)
+  : BUNDLED_ROOT;
 const DC_DIR = process.env.DREAMCOMP_DIR || path.join(ROOT, "dreamcomp");
 const LOCAL_JSON = path.join(ROOT, ".dreamcomp", "local.json");
 const BINDINGS_DEFAULT = path.join(ROOT, "game", "bindings.txt");
@@ -137,6 +150,35 @@ function findRepoRoot() {
 // re-seeding never discards them.
 const WORKSPACE_STAMP = path.join(ROOT, ".dreamcomp", "workspace.json");
 
+function migrateLegacyWorkspace() {
+  if (!app.isPackaged || process.platform !== "win32" || !LEGACY_WORKSPACE_ROOT) return;
+  if (path.resolve(LEGACY_WORKSPACE_ROOT).toLowerCase() === path.resolve(ROOT).toLowerCase()) return;
+
+  // Migrate only player-owned data. Source trees and prebuilt binaries are reseeded
+  // from the current app package below, while these files must survive app updates.
+  const userData = [
+    ".dreamcomp/local.json",
+    ".dreamcomp/bindings.txt",
+    ".dreamcomp/bomberman.vmu",
+    "game/extracted",
+  ];
+
+  for (const relativePath of userData) {
+    const source = path.join(LEGACY_WORKSPACE_ROOT, relativePath);
+    const destination = path.join(ROOT, relativePath);
+    if (!fs.existsSync(source) || fs.existsSync(destination)) continue;
+
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    const stat = fs.statSync(source);
+    if (stat.isDirectory()) {
+      fs.cpSync(source, destination, { recursive: true, force: false, errorOnExist: true });
+    } else {
+      fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
+    }
+    console.log(`migrated player data: ${relativePath}`);
+  }
+}
+
 function bundleStamp() {
   const h = crypto.createHash("sha1");
   h.update(app.getVersion());
@@ -164,6 +206,7 @@ function bundleStamp() {
 
 function prepareWorkspace() {
   if (!app.isPackaged) return;
+  migrateLegacyWorkspace();
   const stamp = bundleStamp();
   try {
     if (JSON.parse(fs.readFileSync(WORKSPACE_STAMP, "utf8")).stamp === stamp) return;
@@ -1434,6 +1477,16 @@ app.whenReady().then(() => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+}).catch((error) => {
+  const details = error && (error.stack || error.message || error);
+  console.error(`[startup] Launcher initialization failed: ${details}`);
+  try {
+    dialog.showErrorBox(
+      "Bomberman Online Launcher could not start",
+      `The launcher could not prepare its writable files. Your previous workspace has not been deleted.\n\n${error && error.message ? error.message : String(error)}\n\nWorkspace: ${ROOT}`
+    );
+  } catch {}
+  app.exit(1);
 });
 
 app.on("window-all-closed", () => {
