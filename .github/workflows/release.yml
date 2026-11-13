@@ -320,6 +320,42 @@ jobs:
         working-directory: tools/launcher
         run: npm run package
 
+      - name: Smoke-test packaged Windows launcher workspace
+        if: runner.os == 'Windows'
+        working-directory: tools/launcher
+        shell: pwsh
+        run: |
+          $launcher = Join-Path (Resolve-Path "dist/win-unpacked").Path "Bomberman Online Launcher.exe"
+          if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
+            throw "Packaged Windows launcher was not found: $launcher"
+          }
+
+          # Exercise the actual packaged startup path under a Unicode user profile
+          # directory, matching the Windows failure report rather than testing dev mode.
+          $env:CI = "true"
+          $env:ELECTRON_DISABLE_GPU = "1"
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP "Bomberman Local AppData - Lázaro Silva"
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA | Out-Null
+
+          & $launcher --selftest --disable-gpu --no-sandbox
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packaged Windows launcher self-test failed with exit code $LASTEXITCODE."
+          }
+
+          $workspace = Join-Path $env:LOCALAPPDATA "bomberman-online-launcher\workspace"
+          foreach ($relativePath in @(
+            "src",
+            "dreamcomp",
+            "game\bomberman_online.toml",
+            "build\game\bomberman-online.exe"
+          )) {
+            $target = Join-Path $workspace $relativePath
+            if (-not (Test-Path -LiteralPath $target)) {
+              throw "Packaged startup did not seed the expected workspace path: $target"
+            }
+          }
+          Write-Host "Packaged Windows launcher seeded its workspace successfully: $workspace"
+
       - name: Upload prebuilt game package
         uses: actions/upload-artifact@v4
         with:
