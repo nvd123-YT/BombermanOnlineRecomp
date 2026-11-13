@@ -148,6 +148,12 @@ function bundleStamp() {
     "dreamcomp/engine/render/CMakeLists.txt",
     "build/game/bomberman-online",
     "build/game/bomberman-online.exe",
+    // Include adjacent platform runtimes in the stamp so updated DLLs refresh
+    // the writable workspace even when the native game executable is unchanged.
+    "build/game/vulkan-1.dll",
+    "build/game/libgcc_s_seh-1.dll",
+    "build/game/libstdc++-6.dll",
+    "build/game/libwinpthread-1.dll",
   ]) {
     try {
       h.update(fs.readFileSync(path.join(BUNDLED_ROOT, rel)));
