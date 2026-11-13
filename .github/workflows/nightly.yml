@@ -107,8 +107,7 @@ jobs:
           git clone --depth 1 --branch release-3.4.20 https://github.com/libsdl-org/SDL.git "$RUNNER_TEMP/SDL"
           cmake -S "$RUNNER_TEMP/SDL" -B "$RUNNER_TEMP/SDL-build" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded \
-            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdl3" \
+                        -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdl3" \
             -DSDL_SHARED=OFF -DSDL_STATIC=ON \
             -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF \
             -DSDL_DISABLE_INSTALL=OFF
@@ -121,8 +120,7 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded \
-            -DDREAMCOMP_DIR=dreamcomp \
+                        -DDREAMCOMP_DIR=dreamcomp \
             -DDREAM_RENDERER=ON \
             -DDREAMCOMP_FRONTEND=ON \
             -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/sdl3" 2>&1 | tee configure.log
@@ -176,6 +174,48 @@ jobs:
           $file = Get-Item -LiteralPath $target
           Write-Host "Bundled Vulkan loader: $loader ($($file.Length) bytes)"
           Get-FileHash -LiteralPath $target -Algorithm SHA256 | Format-List
+
+      - name: Bundle MinGW runtime DLLs and smoke-test Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # The Windows runner uses MinGW-w64 (GNU), not MSVC. The executable
+          # therefore imports these compiler runtime DLLs even though SDL3 is static.
+          $compiler = Get-Command c++.exe -ErrorAction Stop
+          $runtimeDir = Split-Path -Parent $compiler.Source
+          $gameDir = (Resolve-Path "build/game").Path
+          $gameExe = Join-Path $gameDir "bomberman-online.exe"
+          $runtimeDlls = @(
+            "libgcc_s_seh-1.dll",
+            "libstdc++-6.dll",
+            "libwinpthread-1.dll"
+          )
+          foreach ($name in $runtimeDlls) {
+            $source = Join-Path $runtimeDir $name
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+              throw "Required MinGW runtime DLL is missing beside the selected compiler: $source"
+            }
+            $target = Join-Path $gameDir $name
+            Copy-Item -LiteralPath $source -Destination $target -Force
+            $file = Get-Item -LiteralPath $target
+            Write-Host "Bundled MinGW runtime: $name ($($file.Length) bytes)"
+            Get-FileHash -LiteralPath $target -Algorithm SHA256 | Format-List
+          }
+
+          # Prove the actual native game can be loaded and entered on a clean
+          # Windows PATH. Windows resolves adjacent DLLs beside the executable.
+          $oldPath = $env:PATH
+          try {
+            $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+            & $gameExe --help
+            $gameExitCode = $LASTEXITCODE
+          } finally {
+            $env:PATH = $oldPath
+          }
+          if ($gameExitCode -ne 0) {
+            throw "Windows native executable failed its --help startup smoke test (exit $gameExitCode)."
+          }
+          Write-Host "Windows native executable loaded successfully with only its bundled runtime DLLs."
 
       - name: Bundle Vulkan runtime for macOS
         if: runner.os == 'macOS'
