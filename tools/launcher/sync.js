@@ -56,7 +56,7 @@ fs.rmSync(local, { recursive: true, force: true });
 // A release must contain the native game binary plus its adjacent frontend and runtime files.
 // Fail packaging if CI did not produce the game: never publish a launcher-only download.
 const BUILD_GAME_SRC = path.join(ROOT, "build", "game");
-const BUILD_GAME_DST = path.join(HERE, "build", "game");
+const BUILD_GAME_DST = path.join(HERE, "prebuilt-game");
 const GAME_EXE = path.join(
   BUILD_GAME_SRC,
   process.platform === "win32" ? "bomberman-online.exe" : "bomberman-online"
@@ -69,6 +69,6 @@ if (!fs.existsSync(GAME_EXE)) {
 fs.rmSync(BUILD_GAME_DST, { recursive: true, force: true });
 fs.mkdirSync(path.dirname(BUILD_GAME_DST), { recursive: true });
 fs.cpSync(BUILD_GAME_SRC, BUILD_GAME_DST, { recursive: true });
-console.log(`synced prebuilt game and runtime assets from ${BUILD_GAME_SRC}`);
+console.log(`staged prebuilt game payload outside the build directory: ${BUILD_GAME_DST}`);
 
 console.log("launcher build inputs are up to date");
