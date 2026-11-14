@@ -13,7 +13,10 @@ const { spawn, spawnSync } = require("child_process");
 // In dev mode the repository itself is the workspace. A packaged app must not build inside its own
 // bundle: Linux AppImages mount read-only, and Program Files / /Applications may not be writable.
 // Use a per-user workspace and seed it from the copy bundled with the app.
-const BUNDLED_ROOT = findRepoRoot();
+// In a packaged app, the source root must be this app's own resources/app directory.
+ // Walking parent directories first can accidentally select the CI checkout beside dist/,
+ // which is not present on players' machines and does not contain the packaged payload.
+const BUNDLED_ROOT = app.isPackaged ? path.resolve(__dirname) : findRepoRoot();
 // Keep the previous Windows workspace location for one-time user-data migration.
 // Engine/source trees belong in LocalAppData rather than the roaming profile.
 const LEGACY_WORKSPACE_ROOT = app.isPackaged
