@@ -401,9 +401,26 @@ jobs:
           $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP "Bomberman Local AppData - Lázaro Silva"
           New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA | Out-Null
 
-          # Start-Process exposes the real Windows process exit code reliably;
-          # $LASTEXITCODE is not set consistently for GUI-subsystem executables.
-          $testProcess = Start-Process -FilePath $launcher -ArgumentList @("--selftest", "--disable-gpu", "--no-sandbox") -Wait -PassThru -NoNewWindow
+          # Wait for the Electron main process itself, not its entire descendant
+          # process tree. Electron may leave helper processes briefly alive after
+          # the main process exits; Start-Process -Wait can wait on those too.
+          # Capture output and put a hard ceiling on CI so a broken GUI startup
+          # cannot occupy a Windows runner forever.
+          $stdout = Join-Path $env:RUNNER_TEMP "bomberman-launcher-selftest.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "bomberman-launcher-selftest.stderr.log"
+          Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
+          $testProcess = Start-Process -FilePath $launcher -ArgumentList @("--selftest", "--disable-gpu", "--no-sandbox") -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          $completed = $testProcess.WaitForExit(90000)
+          if (-not $completed) {
+            Write-Host "::error::Packaged Windows launcher did not exit within 90 seconds (PID $($testProcess.Id))."
+            if (Test-Path -LiteralPath $stdout) { Get-Content -LiteralPath $stdout -Tail 200 }
+            if (Test-Path -LiteralPath $stderr) { Get-Content -LiteralPath $stderr -Tail 200 }
+            & taskkill.exe /PID $testProcess.Id /T /F | Out-Null
+            throw "Packaged Windows launcher self-test timed out after 90 seconds."
+          }
+          $testProcess.Refresh()
+          if (Test-Path -LiteralPath $stdout) { Get-Content -LiteralPath $stdout }
+          if (Test-Path -LiteralPath $stderr) { Get-Content -LiteralPath $stderr }
           if ($testProcess.ExitCode -ne 0) {
             throw "Packaged Windows launcher self-test failed with exit code $($testProcess.ExitCode)."
           }
