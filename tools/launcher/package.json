@@ -61,7 +61,7 @@
       "package.json",
       "dreamcomp/**",
       "game/**",
-      "build/game/**",
+      "prebuilt-game/**",
       "src/**",
       "CMakeLists.txt",
       "README.md",
