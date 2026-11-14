@@ -250,8 +250,35 @@ function prepareWorkspace() {
   fs.rmSync(workspaceGameBuild, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(workspaceGameBuild), { recursive: true });
   fs.cpSync(bundledGameBuild, workspaceGameBuild, { recursive: true });
+
+  // Verify the exact path used by stateSnapshot()/game launch. A successful
+  // directory copy is not enough: the UI must see this exact executable.
+  const stagedExecutable = path.join(
+    workspaceGameBuild,
+    process.platform === "win32" ? "bomberman-online.exe" : "bomberman-online"
+  );
+  if (!fs.existsSync(stagedExecutable)) {
+    const stagedEntries = fs.existsSync(workspaceGameBuild)
+      ? fs.readdirSync(workspaceGameBuild)
+      : [];
+    throw new Error(
+      `Workspace copy completed but the game executable is missing. ` +
+      `source=${bundledGameBuild}; destination=${workspaceGameBuild}; ` +
+      `expected=${stagedExecutable}; entries=${JSON.stringify(stagedEntries)}`
+    );
+  }
   fs.mkdirSync(path.dirname(WORKSPACE_STAMP), { recursive: true });
   fs.writeFileSync(WORKSPACE_STAMP, JSON.stringify({ stamp, version: app.getVersion() }, null, 2));
+  console.log("WORKSPACE_PATH_CHECK " + JSON.stringify({
+    bundledRoot: BUNDLED_ROOT,
+    workspaceRoot: ROOT,
+    executable: EXE,
+    stagedExecutable,
+    exists: fs.existsSync(EXE),
+    size: fs.statSync(stagedExecutable).size,
+    appUserData: app.getPath("userData"),
+    localAppData: process.env.LOCALAPPDATA || ""
+  }));
   console.log(`workspace seeded at ${ROOT}`);
 }
 
@@ -1237,11 +1264,19 @@ function stateSnapshot() {
       discInfo = { exists: false, name: path.basename(settings.disc) };
     }
   }
+  const executableExists = fs.existsSync(EXE);
   return {
     platform: process.platform,
     version: app.getVersion(),
     updateState: updaterState,
-    paths: { root: ROOT, exe: EXE, localJson: LOCAL_JSON, bindings: BINDINGS_USER },
+    paths: {
+      root: ROOT,
+      exe: EXE,
+      executableExists,
+      bundledRoot: BUNDLED_ROOT,
+      localJson: LOCAL_JSON,
+      bindings: BINDINGS_USER
+    },
     settings,
     discInfo,
     built: fs.existsSync(EXE),
