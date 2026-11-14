@@ -188,14 +188,14 @@ function bundleStamp() {
     "src/bomberman_online.cpp",
     "dreamcomp/tools/dc.py",
     "dreamcomp/engine/render/CMakeLists.txt",
-    "build/game/bomberman-online",
-    "build/game/bomberman-online.exe",
-    // Include adjacent platform runtimes in the stamp so updated DLLs refresh
-    // the writable workspace even when the native game executable is unchanged.
-    "build/game/vulkan-1.dll",
-    "build/game/libgcc_s_seh-1.dll",
-    "build/game/libstdc++-6.dll",
-    "build/game/libwinpthread-1.dll",
+    // The payload lives outside the generic build/ directory because packagers
+    // commonly prune build outputs. sync.js stages the exact runtime payload here.
+    "prebuilt-game/bomberman-online",
+    "prebuilt-game/bomberman-online.exe",
+    "prebuilt-game/vulkan-1.dll",
+    "prebuilt-game/libvulkan.1.dylib",
+    "prebuilt-game/libMoltenVK.dylib",
+    "prebuilt-game/MoltenVK_icd.json",
   ]) {
     try {
       h.update(fs.readFileSync(path.join(BUNDLED_ROOT, rel)));
@@ -233,13 +233,20 @@ function prepareWorkspace() {
   }
   // Ship the prebuilt native game and its adjacent frontend/runtime files into the writable
   // workspace. Only build/game is replaced; settings and VMU saves remain untouched.
-  const bundledGameBuild = path.join(BUNDLED_ROOT, "build", "game");
-  if (fs.existsSync(bundledGameBuild)) {
-    const workspaceGameBuild = path.join(ROOT, "build", "game");
-    fs.rmSync(workspaceGameBuild, { recursive: true, force: true });
-    fs.mkdirSync(path.dirname(workspaceGameBuild), { recursive: true });
-    fs.cpSync(bundledGameBuild, workspaceGameBuild, { recursive: true });
+  const bundledGameBuild = path.join(BUNDLED_ROOT, "prebuilt-game");
+  const bundledExe = path.join(
+    bundledGameBuild,
+    process.platform === "win32" ? "bomberman-online.exe" : "bomberman-online"
+  );
+  if (!fs.existsSync(bundledExe)) {
+    throw new Error(
+      `The packaged native game is missing: ${bundledExe}. Refusing to start a launcher-only package.`
+    );
   }
+  const workspaceGameBuild = path.join(ROOT, "build", "game");
+  fs.rmSync(workspaceGameBuild, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(workspaceGameBuild), { recursive: true });
+  fs.cpSync(bundledGameBuild, workspaceGameBuild, { recursive: true });
   fs.mkdirSync(path.dirname(WORKSPACE_STAMP), { recursive: true });
   fs.writeFileSync(WORKSPACE_STAMP, JSON.stringify({ stamp, version: app.getVersion() }, null, 2));
   console.log(`workspace seeded at ${ROOT}`);
@@ -1039,6 +1046,15 @@ async function runSelftest() {
       "renderer self-test"
     );
     if (report && report.failures) failures.push(...report.failures);
+    // A packaged launcher is not usable unless its prebuilt native game and
+    // renderer payload reached the writable workspace. Catch missing package
+    // resources here rather than publishing an apparently healthy empty shell.
+    if (app.isPackaged && report && report.built !== true) {
+      failures.push("packaged native game executable is missing from the writable workspace");
+    }
+    if (app.isPackaged && report && report.renderer !== true) {
+      failures.push("packaged native game renderer is unavailable");
+    }
 
     console.log("SELFTEST_PHASE screenshot");
     const image = await withSelftestTimeout(
