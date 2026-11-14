@@ -879,6 +879,7 @@ window.__selftest = () => {
     settings: S,
     built: snapshot && snapshot.built,
     renderer: snapshot && snapshot.renderer,
+    paths: snapshot && snapshot.paths,
     platform: snapshot && snapshot.platform,
   };
 };
