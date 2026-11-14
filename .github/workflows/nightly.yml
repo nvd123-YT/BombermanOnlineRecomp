@@ -367,6 +367,58 @@ jobs:
         working-directory: tools/launcher
         run: npm run package
 
+      - name: Smoke-test packaged Windows launcher workspace
+        if: runner.os == 'Windows'
+        working-directory: tools/launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $appDir = (Resolve-Path "dist/win-unpacked/resources/app").Path
+          $launcher = Join-Path (Resolve-Path "dist/win-unpacked").Path "Bomberman Online Launcher.exe"
+          $bundledExe = Join-Path $appDir "prebuilt-game\bomberman-online.exe"
+          if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
+            throw "Packaged Windows launcher was not found: $launcher"
+          }
+          if (-not (Test-Path -LiteralPath $bundledExe -PathType Leaf)) {
+            throw "electron-builder did not include the native game payload: $bundledExe"
+          }
+          $bundledLoader = Join-Path $appDir "prebuilt-game\vulkan-1.dll"
+          if (-not (Test-Path -LiteralPath $bundledLoader -PathType Leaf)) {
+            throw "electron-builder did not include the Vulkan loader: $bundledLoader"
+          }
+          Write-Host "Packaged game payload: $((Get-Item -LiteralPath $bundledExe).Length) bytes"
+          Write-Host "Packaged Vulkan loader: $((Get-Item -LiteralPath $bundledLoader).Length) bytes"
+
+          # Exercise the actual packaged startup path under a Unicode user profile,
+          # matching the Windows report rather than testing only Electron dev mode.
+          $env:CI = "true"
+          $env:ELECTRON_DISABLE_GPU = "1"
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP "Bomberman Local AppData - Lázaro Silva"
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA | Out-Null
+
+          # Start-Process exposes the real Windows process exit code reliably;
+          # $LASTEXITCODE is not set consistently for GUI-subsystem executables.
+          $testProcess = Start-Process -FilePath $launcher -ArgumentList @("--selftest", "--disable-gpu", "--no-sandbox") -Wait -PassThru -NoNewWindow
+          if ($testProcess.ExitCode -ne 0) {
+            throw "Packaged Windows launcher self-test failed with exit code $($testProcess.ExitCode)."
+          }
+
+          $workspace = Join-Path $env:LOCALAPPDATA "bomberman-online-launcher\workspace"
+          foreach ($relativePath in @(
+            "src",
+            "dreamcomp",
+            "game\bomberman_online.toml",
+            "build\game\bomberman-online.exe",
+            "build\game\vulkan-1.dll",
+            "build\game\frontend"
+          )) {
+            $target = Join-Path $workspace $relativePath
+            if (-not (Test-Path -LiteralPath $target)) {
+              throw "Packaged startup did not seed the expected workspace path: $target"
+            }
+          }
+          Write-Host "Packaged Windows launcher seeded its native game and renderer workspace: $workspace"
+
       - name: Upload prebuilt game package
         uses: actions/upload-artifact@v4
         with:
