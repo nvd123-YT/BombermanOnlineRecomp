@@ -225,6 +225,9 @@ function copyDirectoryTree(source, destination, totals = { files: 0, bytes: 0, d
 function bundleStamp() {
   const h = crypto.createHash("sha1");
   h.update(app.getVersion());
+  // Bump this whenever the writable workspace layout or seeding rules change.
+  // Existing installations may have a matching old stamp despite missing source trees.
+  h.update("workspace-layout-v2");
   for (const rel of [
     "CMakeLists.txt",
     "game/bomberman_online.toml",
@@ -251,8 +254,31 @@ function prepareWorkspace() {
   if (!app.isPackaged) return;
   migrateLegacyWorkspace();
   const stamp = bundleStamp();
+  const requiredWorkspacePaths = [
+    [path.join(ROOT, "src", "bomberman_online.cpp"), "file"],
+    [path.join(ROOT, "dreamcomp", "tools", "dc.py"), "file"],
+    [path.join(ROOT, "game", "bomberman_online.toml"), "file"],
+    [EXE, "file"],
+    [path.join(ROOT, "build", "game", "frontend"), "directory"],
+    ...(process.platform === "win32"
+      ? [[path.join(ROOT, "build", "game", "vulkan-1.dll"), "file"]]
+      : [])
+  ];
+  const workspaceComplete = requiredWorkspacePaths.every(([target, kind]) => {
+    try {
+      const stat = fs.statSync(target);
+      return kind === "directory" ? stat.isDirectory() : stat.isFile() && stat.size > 0;
+    } catch {
+      return false;
+    }
+  });
   try {
-    if (JSON.parse(fs.readFileSync(WORKSPACE_STAMP, "utf8")).stamp === stamp) return;
+    if (JSON.parse(fs.readFileSync(WORKSPACE_STAMP, "utf8")).stamp === stamp &&
+        workspaceComplete) {
+      console.log("workspace stamp and required files verified; reusing existing workspace");
+      return;
+    }
+    console.warn("workspace stamp is stale or required files are missing; reseeding player workspace");
   } catch {}
   fs.mkdirSync(ROOT, { recursive: true });
   // Source trees have no user data in them, so replacing them wholesale is safe.
