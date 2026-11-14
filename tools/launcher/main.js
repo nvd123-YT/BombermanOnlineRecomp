@@ -256,12 +256,34 @@ function prepareWorkspace() {
   } catch {}
   fs.mkdirSync(ROOT, { recursive: true });
   // Source trees have no user data in them, so replacing them wholesale is safe.
+  // Use the same verified copier as the native payload: fs.cpSync silently left
+  // these workspace directories empty on the Windows packaged-launcher runner.
   for (const name of ["src", "dreamcomp"]) {
     const from = path.join(BUNDLED_ROOT, name);
-    if (!fs.existsSync(from)) continue;
+    if (!fs.existsSync(from) || !fs.statSync(from).isDirectory()) {
+      throw new Error(`The packaged launcher is missing its required ${name} source directory: ${from}`);
+    }
     const to = path.join(ROOT, name);
     fs.rmSync(to, { recursive: true, force: true });
-    fs.cpSync(from, to, { recursive: true });
+    const summary = copyDirectoryTree(from, to);
+    console.log("WORKSPACE_SOURCE_COPY " + JSON.stringify({
+      name,
+      source: from,
+      destination: to,
+      ...summary
+    }));
+    if (!fs.existsSync(to) || fs.readdirSync(to).length === 0) {
+      throw new Error(`The packaged ${name} source tree was not copied into the writable workspace: ${to}`);
+    }
+  }
+  for (const [relativePath, label] of [
+    [path.join("src", "bomberman_online.cpp"), "game source"],
+    [path.join("dreamcomp", "tools", "dc.py"), "dreamcomp build tool"]
+  ]) {
+    const target = path.join(ROOT, relativePath);
+    if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+      throw new Error(`The packaged ${label} is missing from the writable workspace: ${target}`);
+    }
   }
   for (const name of ["CMakeLists.txt", "README.md", "LICENSE"]) {
     const from = path.join(BUNDLED_ROOT, name);
