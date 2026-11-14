@@ -101,7 +101,14 @@ jobs:
         run: |
           if ! command -v ninja >/dev/null 2>&1; then brew install ninja; fi
 
+      - name: Configure MSVC developer environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Build static SDL3
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           git clone --depth 1 --branch release-3.4.20 https://github.com/libsdl-org/SDL.git "$RUNNER_TEMP/SDL"
@@ -116,6 +123,7 @@ jobs:
           echo "CMAKE_PREFIX_PATH=$RUNNER_TEMP/sdl3" >> "$GITHUB_ENV"
 
       - name: Configure native game with Vulkan renderer
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           cmake -S . -B build -G Ninja \
@@ -130,6 +138,7 @@ jobs:
           fi
 
       - name: Compile the actual Bomberman Online game
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           cmake --build build --target bomberman_online_boot --parallel 2
@@ -143,79 +152,122 @@ jobs:
           echo "Prebuilt executable ready: $GAME_EXE"
           ls -lah build/game
 
-      - name: Bundle Windows Vulkan loader
+      - name: Build and verify Windows game with clang-cl and static CRT
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # The executable imports vulkan-1.dll through the Vulkan SDK import
-          # library. Ship the matching x64 loader beside the game executable so
-          # RecompLauncher does not depend on the player's graphics driver having
-          # installed a global Vulkan loader in System32.
-          $sdkLoader = $null
-          if (-not [string]::IsNullOrWhiteSpace($env:VULKAN_SDK)) {
-            $candidate = Join-Path $env:VULKAN_SDK "Bin\vulkan-1.dll"
-            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-              $sdkLoader = $candidate
-            }
+          $ErrorActionPreference = "Stop"
+
+          # Use the Windows toolchain documented by dreamcomp: clang-cl, Ninja,
+          # and the Visual Studio x64 linker. Do not build with runner MinGW g++.
+          $clang = Get-Command clang-cl.exe -ErrorAction Stop
+          $linker = Get-Command link.exe -ErrorAction Stop
+          Get-Command dumpbin.exe -ErrorAction Stop | Out-Null
+          Write-Host "clang-cl: $($clang.Source)"
+          Write-Host "MSVC linker: $($linker.Source)"
+
+          $sdlSource = Join-Path $env:RUNNER_TEMP "SDL"
+          $sdlBuild = Join-Path $env:RUNNER_TEMP "SDL-build"
+          $sdlPrefix = Join-Path $env:RUNNER_TEMP "sdl3"
+          & git clone --depth 1 --branch release-3.4.20 https://github.com/libsdl-org/SDL.git $sdlSource
+          if ($LASTEXITCODE -ne 0) { throw "Could not fetch SDL3 source." }
+
+          # SDL and the game must use the same compiler and static CRT.
+          $sdlConfigureArgs = @(
+            "-S", $sdlSource, "-B", $sdlBuild, "-G", "Ninja",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_C_COMPILER=clang-cl",
+            "-DCMAKE_CXX_COMPILER=clang-cl",
+            "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
+            "-DCMAKE_POLICY_DEFAULT_CMP0091=NEW",
+            "-DCMAKE_INSTALL_PREFIX=$sdlPrefix",
+            "-DSDL_SHARED=OFF", "-DSDL_STATIC=ON",
+            "-DSDL_TEST_LIBRARY=OFF", "-DSDL_TESTS=OFF", "-DSDL_EXAMPLES=OFF",
+            "-DSDL_DISABLE_INSTALL=OFF"
+          )
+          & cmake @sdlConfigureArgs
+          if ($LASTEXITCODE -ne 0) { throw "SDL3 configuration failed with clang-cl." }
+
+          & cmake --build $sdlBuild --config Release --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "SDL3 static build failed." }
+
+          & cmake --install $sdlBuild --config Release
+          if ($LASTEXITCODE -ne 0) { throw "SDL3 installation failed." }
+
+          # /MT applies to the complete build graph, including vendored engine
+          # libraries. The resulting executable must not import MinGW or VCRuntime.
+          $gameConfigureArgs = @(
+            "-S", ".", "-B", "build", "-G", "Ninja",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_C_COMPILER=clang-cl",
+            "-DCMAKE_CXX_COMPILER=clang-cl",
+            "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
+            "-DCMAKE_POLICY_DEFAULT_CMP0091=NEW",
+            "-DDREAMCOMP_DIR=dreamcomp",
+            "-DDREAM_RENDERER=ON",
+            "-DDREAMCOMP_FRONTEND=ON",
+            "-DCMAKE_PREFIX_PATH=$sdlPrefix"
+          )
+          $configureOutput = & cmake @gameConfigureArgs 2>&1
+          $configureExitCode = $LASTEXITCODE
+          $configureOutput | Tee-Object -FilePath configure-windows.log
+          if ($configureExitCode -ne 0) { throw "Bomberman CMake configuration failed." }
+          if (($configureOutput -join [Environment]::NewLine) -notmatch "Vulkan backend enabled") {
+            throw "Vulkan renderer was not configured; refusing to package a headless Windows build."
           }
+
+          & cmake --build build --target bomberman_online_boot --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Bomberman Online failed to compile with clang-cl." }
+
+          $gameDir = (Resolve-Path "build/game").Path
+          $gameExe = Join-Path $gameDir "bomberman-online.exe"
+          if (-not (Test-Path -LiteralPath $gameExe -PathType Leaf)) {
+            throw "Native Windows executable was not produced: $gameExe"
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $gameDir "frontend") -PathType Container)) {
+            throw "Game frontend assets were not produced."
+          }
+
+          # Bundle the x64 Vulkan loader; all other non-system imports must be absent.
+          $sdkLoader = Join-Path $env:VULKAN_SDK "Bin\vulkan-1.dll"
           $systemLoader = Join-Path $env:SystemRoot "System32\vulkan-1.dll"
-          if ($sdkLoader) {
+          if (Test-Path -LiteralPath $sdkLoader -PathType Leaf) {
             $loader = $sdkLoader
           } elseif (Test-Path -LiteralPath $systemLoader -PathType Leaf) {
             $loader = $systemLoader
           } else {
-            throw "The Vulkan SDK/runtime did not provide an x64 vulkan-1.dll; refusing to create a Windows package that cannot start."
+            throw "No x64 vulkan-1.dll was found in the Vulkan SDK or Windows System32."
           }
-          $target = Join-Path (Resolve-Path "build/game").Path "vulkan-1.dll"
-          Copy-Item -LiteralPath $loader -Destination $target -Force
-          if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
-            throw "Failed to stage vulkan-1.dll beside bomberman-online.exe."
-          }
-          $file = Get-Item -LiteralPath $target
-          Write-Host "Bundled Vulkan loader: $loader ($($file.Length) bytes)"
-          Get-FileHash -LiteralPath $target -Algorithm SHA256 | Format-List
+          Copy-Item -LiteralPath $loader -Destination (Join-Path $gameDir "vulkan-1.dll") -Force
+          Write-Host "Bundled Vulkan loader from $loader"
 
-      - name: Bundle MinGW runtime DLLs and smoke-test Windows executable
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          # The Windows runner uses MinGW-w64 (GNU), not MSVC. The executable
-          # therefore imports these compiler runtime DLLs even though SDL3 is static.
-          $compiler = Get-Command c++.exe -ErrorAction Stop
-          $runtimeDir = Split-Path -Parent $compiler.Source
-          $gameDir = (Resolve-Path "build/game").Path
-          $gameExe = Join-Path $gameDir "bomberman-online.exe"
-          $runtimeDlls = @(
-            "libgcc_s_seh-1.dll",
-            "libstdc++-6.dll",
-            "libwinpthread-1.dll"
-          )
-          foreach ($name in $runtimeDlls) {
-            $source = Join-Path $runtimeDir $name
-            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-              throw "Required MinGW runtime DLL is missing beside the selected compiler: $source"
-            }
-            $target = Join-Path $gameDir $name
-            Copy-Item -LiteralPath $source -Destination $target -Force
-            $file = Get-Item -LiteralPath $target
-            Write-Host "Bundled MinGW runtime: $name ($($file.Length) bytes)"
-            Get-FileHash -LiteralPath $target -Algorithm SHA256 | Format-List
+          # Inspect the actual PE import table so a MinGW build or dynamic MSVC
+          # CRT cannot silently slip into a release again.
+          $imports = & dumpbin.exe /nologo /dependents $gameExe 2>&1
+          if ($LASTEXITCODE -ne 0) { throw "dumpbin could not inspect the Windows executable." }
+          $importText = $imports -join [Environment]::NewLine
+          Write-Host $importText
+          if ($importText -match "(?i)libgcc|libstdc\+\+|libwinpthread|libatomic|libgomp") {
+            throw "Windows executable still imports a GNU/MinGW runtime; refusing to package it."
+          }
+          if ($importText -match "(?i)\bVCRUNTIME\d+(?:_\d+)?\.dll|\bMSVCP\d+\.dll") {
+            throw "Windows executable still imports the dynamic MSVC runtime; expected the static /MT runtime."
           }
 
-          # Prove the actual native game can be loaded and entered on a clean
-          # Windows PATH. Windows resolves adjacent DLLs beside the executable.
+          # Test with no compiler or user-installed runtime directories on PATH.
+          # Windows still resolves DLLs shipped beside the executable.
           $oldPath = $env:PATH
           try {
-            $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+            $env:PATH = "$gameDir;$env:SystemRoot\System32;$env:SystemRoot"
             & $gameExe --help
             $gameExitCode = $LASTEXITCODE
           } finally {
             $env:PATH = $oldPath
           }
           if ($gameExitCode -ne 0) {
-            throw "Windows native executable failed its --help startup smoke test (exit $gameExitCode)."
+            throw "Windows native executable failed its clean-PATH startup test (exit $gameExitCode)."
           }
-          Write-Host "Windows native executable loaded successfully with only its bundled runtime DLLs."
+          Write-Host "Windows clang-cl executable passed import-table and clean-PATH startup checks."
 
       - name: Bundle Vulkan runtime for macOS
         if: runner.os == 'macOS'
