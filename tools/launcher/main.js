@@ -182,6 +182,46 @@ function migrateLegacyWorkspace() {
   }
 }
 
+// Copy a directory tree using explicit directory enumeration and copyFileSync.
+ // fs.cpSync returned successfully but left an empty destination for the packaged
+ // Windows game payload in CI. This path is deliberately simple and verifies every file.
+function copyDirectoryTree(source, destination, totals = { files: 0, bytes: 0, directories: 0 }) {
+  const sourceStat = fs.statSync(source);
+  if (!sourceStat.isDirectory()) {
+    throw new Error(`Expected a directory to copy: ${source}`);
+  }
+
+  fs.mkdirSync(destination, { recursive: true });
+  totals.directories += 1;
+
+  for (const name of fs.readdirSync(source)) {
+    const sourcePath = path.join(source, name);
+    const destinationPath = path.join(destination, name);
+    const entryStat = fs.statSync(sourcePath);
+
+    if (entryStat.isDirectory()) {
+      copyDirectoryTree(sourcePath, destinationPath, totals);
+      continue;
+    }
+    if (!entryStat.isFile()) {
+      throw new Error(`Unsupported non-file entry in packaged game payload: ${sourcePath}`);
+    }
+
+    fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
+    fs.copyFileSync(sourcePath, destinationPath);
+    const copiedStat = fs.statSync(destinationPath);
+    if (copiedStat.size !== entryStat.size) {
+      throw new Error(
+        `Incomplete packaged game copy: ${sourcePath} (${entryStat.size} bytes) -> ${destinationPath} (${copiedStat.size} bytes)`
+      );
+    }
+    totals.files += 1;
+    totals.bytes += copiedStat.size;
+  }
+
+  return totals;
+}
+
 function bundleStamp() {
   const h = crypto.createHash("sha1");
   h.update(app.getVersion());
@@ -249,10 +289,20 @@ function prepareWorkspace() {
   const workspaceGameBuild = path.join(ROOT, "build", "game");
   fs.rmSync(workspaceGameBuild, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(workspaceGameBuild), { recursive: true });
-  fs.cpSync(bundledGameBuild, workspaceGameBuild, { recursive: true });
+  const sourceEntries = fs.readdirSync(bundledGameBuild);
+  console.log("WORKSPACE_COPY_SOURCE " + JSON.stringify({
+    source: bundledGameBuild,
+    entries: sourceEntries
+  }));
+  const copySummary = copyDirectoryTree(bundledGameBuild, workspaceGameBuild);
+  console.log("WORKSPACE_COPY_SUMMARY " + JSON.stringify({
+    source: bundledGameBuild,
+    destination: workspaceGameBuild,
+    ...copySummary
+  }));
 
-  // Verify the exact path used by stateSnapshot()/game launch. A successful
-  // directory copy is not enough: the UI must see this exact executable.
+  // Verify the exact path used by stateSnapshot()/game launch, including byte
+  // equality with the bundled executable before the workspace is marked seeded.
   const stagedExecutable = path.join(
     workspaceGameBuild,
     process.platform === "win32" ? "bomberman-online.exe" : "bomberman-online"
@@ -262,9 +312,24 @@ function prepareWorkspace() {
       ? fs.readdirSync(workspaceGameBuild)
       : [];
     throw new Error(
-      `Workspace copy completed but the game executable is missing. ` +
+      `Workspace copy did not produce the game executable. ` +
       `source=${bundledGameBuild}; destination=${workspaceGameBuild}; ` +
-      `expected=${stagedExecutable}; entries=${JSON.stringify(stagedEntries)}`
+      `expected=${stagedExecutable}; sourceEntries=${JSON.stringify(sourceEntries)}; ` +
+      `destinationEntries=${JSON.stringify(stagedEntries)}; copiedFiles=${copySummary.files}`
+    );
+  }
+  const bundledExeSize = fs.statSync(bundledExe).size;
+  const stagedExeSize = fs.statSync(stagedExecutable).size;
+  if (stagedExeSize !== bundledExeSize || stagedExeSize === 0) {
+    throw new Error(
+      `Packaged game executable copy failed size verification: bundled=${bundledExeSize}; staged=${stagedExeSize}; path=${stagedExecutable}`
+    );
+  }
+  if (process.platform === "win32" &&
+      (!fs.existsSync(path.join(workspaceGameBuild, "vulkan-1.dll")) ||
+       !fs.existsSync(path.join(workspaceGameBuild, "frontend")))) {
+    throw new Error(
+      `Windows renderer payload is incomplete after copy: ${workspaceGameBuild}`
     );
   }
   fs.mkdirSync(path.dirname(WORKSPACE_STAMP), { recursive: true });
