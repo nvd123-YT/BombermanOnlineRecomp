@@ -372,6 +372,54 @@ jobs:
         working-directory: tools/launcher
         run: npm run package
 
+      - name: Smoke-test packaged macOS RecompLauncher integration
+        if: runner.os == 'macOS'
+        working-directory: tools/launcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg="$(find dist -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          zip="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          test -n "$dmg" || { echo "::error::macOS DMG was not produced"; exit 1; }
+          test -n "$zip" || { echo "::error::macOS ZIP was not produced"; exit 1; }
+
+          # Both macOS release formats must carry the profile at their top level.
+          # RecompLauncher extracts every top-level DMG item beside the .app bundle.
+          python3 - "$zip" <<'PY'
+          from pathlib import Path
+          import sys
+          import zipfile
+
+          archive_path = Path(sys.argv[1])
+          expected = Path("recomplauncher.json").read_bytes()
+          with zipfile.ZipFile(archive_path) as archive:
+              names = archive.namelist()
+              if "recomplauncher.json" not in names:
+                  raise SystemExit("Mac ZIP is missing root-level recomplauncher.json")
+              if archive.read("recomplauncher.json") != expected:
+                  raise SystemExit("Mac ZIP's RecompLauncher profile differs from the source profile")
+              if not any(name.endswith(".app/Contents/Info.plist") for name in names):
+                  raise SystemExit("Mac ZIP is missing the launcher .app bundle")
+          print("Mac ZIP contains the launcher app and matching root-level RecompLauncher profile.")
+          PY
+
+          mount="$(mktemp -d "$RUNNER_TEMP/bmo-recomplauncher-dmg.XXXXXX")"
+          cleanup() {
+            hdiutil detach "$mount" -quiet >/dev/null 2>&1 || true
+            rmdir "$mount" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$mount" "$dmg"
+          test -s "$mount/recomplauncher.json" || {
+            echo "::error::Mac DMG is missing root-level recomplauncher.json"
+            exit 1
+          }
+          cmp recomplauncher.json "$mount/recomplauncher.json"
+          app="$(find "$mount" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$app" || { echo "::error::Mac DMG is missing the launcher .app bundle"; exit 1; }
+          test -s "$app/Contents/Info.plist"
+          echo "Mac DMG contains the launcher app and matching root-level RecompLauncher profile."
+
       - name: Smoke-test packaged Windows launcher workspace
         if: runner.os == 'Windows'
         working-directory: tools/launcher
